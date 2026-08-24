@@ -1,0 +1,23 @@
+!pip install -q facebook_business
+
+from facebook_business.api import FacebookAdsApi
+from facebook_business.adobjects.user import User
+
+ACCESS_TOKEN = input("Встав Meta Access Token: ").strip()
+
+FacebookAdsApi.init(access_token=ACCESS_TOKEN)
+
+me = User(fbid="me")
+
+accounts = me.get_ad_accounts(
+    fields=[
+        "id",
+        "name",
+        "account_status",
+        "currency",
+        "timezone_name"
+    ]
+)
+
+for account in accounts:
+    print(dict(account))
