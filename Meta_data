@@ -507,3 +507,41 @@ run_meta_etl(
     date_from="2026-08-01",
     date_to="2026-08-24"
 )
+
+
+✓ Table already exists: crested-aquifer-142707.facebook_cabinets_iov.export_facebook_cabinates_iov
+
+============================================================
+Processing: 2026-01-01
+============================================================
+  Meta account: 508657446714126
+  Meta account: 394796152401096
+Rows: 17
+Accounts: 1
+Campaigns: 4
+Adsets: 6
+Ads: 17
+Spend: 0.00
+❌ ERROR 2026-01-01
+503 POST https://bigquery.googleapis.com/upload/bigquery/v2/projects/%D0%A2%D0%92%D0%86%D0%99_PROJECT_ID/jobs?uploadType=multipart: Service Unavailable
+---------------------------------------------------------------------------
+InvalidResponse                           Traceback (most recent call last)
+/usr/local/lib/python3.13/dist-packages/google/cloud/bigquery/client.py in load_table_from_file(self, file_obj, destination, rewind, size, num_retries, job_id, job_id_prefix, location, project, job_config, timeout)
+   2715             else:
+-> 2716                 response = self._do_multipart_upload(
+   2717                     file_obj, job_resource, size, num_retries, timeout, project=project
+
+10 frames
+InvalidResponse: ('Request failed with status code', 503, 'Expected one of', <HTTPStatus.OK: 200>)
+
+During handling of the above exception, another exception occurred:
+
+ServiceUnavailable                        Traceback (most recent call last)
+/usr/local/lib/python3.13/dist-packages/google/cloud/bigquery/client.py in load_table_from_file(self, file_obj, destination, rewind, size, num_retries, job_id, job_id_prefix, location, project, job_config, timeout)
+   2718                 )
+   2719         except resumable_media.InvalidResponse as exc:
+-> 2720             raise exceptions.from_http_response(exc.response)
+   2721 
+   2722         return typing.cast(LoadJob, self.job_from_resource(response.json()))
+
+ServiceUnavailable: 503 POST https://bigquery.googleapis.com/upload/bigquery/v2/projects/%D0%A2%D0%92%D0%86%D0%99_PROJECT_ID/jobs?uploadType=multipart: Service Unavailable
