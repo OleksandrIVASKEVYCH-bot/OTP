@@ -370,3 +370,28 @@ run_meta_etl(
     date_to="2026-08-24"
 )
 
+
+✓ Table created: crested-aquifer-142707.facebook_cabinets_iov.export_facebook_cabinates_iov
+
+============================================================
+Processing: 2026-01-01
+============================================================
+❌ ERROR 2026-01-01
+name 'load_meta_ads_one_day' is not defined
+---------------------------------------------------------------------------
+NameError                                 Traceback (most recent call last)
+/tmp/ipykernel_2024/3629500774.py in <cell line: 0>()
+----> 1 run_meta_etl(
+      2     account_ids=ACCOUNT_IDS,
+      3     date_from="2026-01-01",
+      4     date_to="2026-08-24"
+      5 )
+
+/tmp/ipykernel_2024/4187531131.py in run_meta_etl(account_ids, date_from, date_to)
+     36 
+     37             # 1. Отримуємо дані Meta за конкретний день
+---> 38             df_day = load_meta_ads_one_day(
+     39                 account_ids=account_ids,
+     40                 current_date=date_str
+
+NameError: name 'load_meta_ads_one_day' is not defined
