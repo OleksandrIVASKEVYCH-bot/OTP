@@ -449,3 +449,31 @@ run_meta_etl(
     date_from="2026-08-01",
     date_to="2026-08-24"
 )
+
+
+✓ Table already exists: crested-aquifer-142707.facebook_cabinets_iov.export_facebook_cabinates_iov
+
+============================================================
+Processing: 2026-01-01
+============================================================
+  Meta account: 508657446714126
+  Meta account: 394796152401096
+❌ ERROR 2026-01-01
+name 'prepare_meta_df' is not defined
+---------------------------------------------------------------------------
+NameError                                 Traceback (most recent call last)
+/tmp/ipykernel_2024/3629500774.py in <cell line: 0>()
+----> 1 run_meta_etl(
+      2     account_ids=ACCOUNT_IDS,
+      3     date_from="2026-01-01",
+      4     date_to="2026-08-24"
+      5 )
+
+/tmp/ipykernel_2024/4187531131.py in run_meta_etl(account_ids, date_from, date_to)
+     50 
+     51                 # 2. Приводимо типи
+---> 52                 df_day = prepare_meta_df(
+     53                     df_day
+     54                 )
+
+NameError: name 'prepare_meta_df' is not defined
