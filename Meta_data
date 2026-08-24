@@ -196,3 +196,165 @@ account_check = (
 )
 
 display(account_check)
+
+===============================================
+TABLE_ID = "export_facebook_cabinates_iov"
+
+from google.cloud import bigquery
+from google.cloud.exceptions import NotFound
+
+
+TABLE_ID = "export_facebook_cabinates_iov"
+
+table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+
+
+def ensure_facebook_table():
+
+    try:
+        table = bigquery_client.get_table(table_ref)
+
+        print(f"✓ Table already exists: {table_ref}")
+
+    except NotFound:
+
+        table = bigquery.Table(
+            table_ref,
+            schema=schema_facebook_stat
+        )
+
+        table = bigquery_client.create_table(table)
+
+        print(f"✓ Table created: {table_ref}")
+
+    return table_ref
+
+
+from datetime import datetime, timedelta
+
+
+def run_meta_etl(
+    account_ids,
+    date_from,
+    date_to
+):
+
+    # Створить таблицю лише якщо її ще немає
+    table_ref = ensure_facebook_table()
+
+    current_date = datetime.strptime(
+        date_from,
+        "%Y-%m-%d"
+    )
+
+    final_date = datetime.strptime(
+        date_to,
+        "%Y-%m-%d"
+    )
+
+
+    while current_date <= final_date:
+
+        date_str = current_date.strftime(
+            "%Y-%m-%d"
+        )
+
+        print()
+        print("=" * 60)
+        print(f"Processing: {date_str}")
+        print("=" * 60)
+
+        try:
+
+            # 1. Отримуємо дані Meta за конкретний день
+            df_day = load_meta_ads_one_day(
+                account_ids=account_ids,
+                current_date=date_str
+            )
+
+            if df_day.empty:
+
+                print(
+                    f"⏹ No Meta data for {date_str}"
+                )
+
+            else:
+
+                # 2. Приводимо типи
+                df_day = prepare_meta_df(
+                    df_day
+                )
+
+                print(
+                    f"Rows: {len(df_day)}"
+                )
+
+                print(
+                    f"Accounts: "
+                    f"{df_day['account_id'].nunique()}"
+                )
+
+                print(
+                    f"Campaigns: "
+                    f"{df_day['campaign_id'].nunique()}"
+                )
+
+                print(
+                    f"Adsets: "
+                    f"{df_day['adset_id'].nunique()}"
+                )
+
+                print(
+                    f"Ads: "
+                    f"{df_day['ad_id'].nunique()}"
+                )
+
+                print(
+                    f"Spend: "
+                    f"{df_day['spend'].sum():,.2f}"
+                )
+
+                # 3. Завантажуємо цей день у BigQuery
+                job_config = bigquery.LoadJobConfig(
+                    schema=schema_facebook_stat,
+                    write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+                )
+
+                job = bigquery_client.load_table_from_dataframe(
+                    df_day,
+                    table_ref,
+                    job_config=job_config
+                )
+
+                job.result()
+
+                print(
+                    f"✓ Uploaded {len(df_day)} rows"
+                )
+
+                print(
+                    f"✓ Completed: {date_str}"
+                )
+
+        except Exception as e:
+
+            print(
+                f"❌ ERROR {date_str}"
+            )
+
+            print(e)
+
+            raise
+
+        current_date += timedelta(days=1)
+
+
+run_meta_etl(
+    account_ids=ACCOUNT_IDS,
+    date_from="2026-08-01",
+    date_to="2026-08-24"
+)
+
+
+
+
