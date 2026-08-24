@@ -358,3 +358,21 @@ run_meta_etl(
 
 
 
+---------------------------------------------------------------------------
+NameError                                 Traceback (most recent call last)
+/tmp/ipykernel_2024/3629500774.py in <cell line: 0>()
+----> 1 run_meta_etl(
+      2     account_ids=ACCOUNT_IDS,
+      3     date_from="2026-01-01",
+      4     date_to="2026-08-24"
+      5 )
+
+1 frames
+/tmp/ipykernel_2024/2611765372.py in ensure_facebook_table()
+     13 
+     14     try:
+---> 15         table = bigquery_client.get_table(table_ref)
+     16 
+     17         print(f"✓ Table already exists: {table_ref}")
+
+NameError: name 'bigquery_client' is not defined
