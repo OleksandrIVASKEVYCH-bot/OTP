@@ -228,7 +228,22 @@ def ensure_facebook_table():
         print(f"✓ Table created: {table_ref}")
 
     return table_ref
+============================================================
 
+from google.colab import auth
+from google.cloud import bigquery
+
+auth.authenticate_user()
+
+PROJECT_ID = "ТВІЙ_PROJECT_ID"
+DATASET_ID = "ТВІЙ_DATASET_ID"
+
+bigquery_client = bigquery.Client(
+    project=PROJECT_ID
+)
+
+print("BigQuery client:", bigquery_client.project)
+============================================================
 
 from datetime import datetime, timedelta
 
@@ -355,24 +370,3 @@ run_meta_etl(
     date_to="2026-08-24"
 )
 
-
-
-
----------------------------------------------------------------------------
-NameError                                 Traceback (most recent call last)
-/tmp/ipykernel_2024/3629500774.py in <cell line: 0>()
-----> 1 run_meta_etl(
-      2     account_ids=ACCOUNT_IDS,
-      3     date_from="2026-01-01",
-      4     date_to="2026-08-24"
-      5 )
-
-1 frames
-/tmp/ipykernel_2024/2611765372.py in ensure_facebook_table()
-     13 
-     14     try:
----> 15         table = bigquery_client.get_table(table_ref)
-     16 
-     17         print(f"✓ Table already exists: {table_ref}")
-
-NameError: name 'bigquery_client' is not defined
