@@ -1,0 +1,6 @@
+ No matching signature for function JSON_QUERY_ARRAY
+  Argument types: ARRAY<STRUCT<action_type STRING, value STRING>>
+  Signature: JSON_QUERY_ARRAY(STRING, [STRING])
+    Argument 1: Unable to coerce type ARRAY<STRUCT<action_type STRING, value STRING>> to expected type STRING
+  Signature: JSON_QUERY_ARRAY(JSON, [STRING])
+    Argument 1: Unable to coerce type ARRAY<STRUCT<action_type STRING, value STRING>> to expected type JSON at [4:8] 
