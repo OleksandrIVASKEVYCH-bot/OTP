@@ -1,0 +1,19 @@
+with pivoting_subquery as (
+SELECT 
+  date,
+  account_id,
+  adset_name,
+  campaign_name,
+  clicks,
+  impressions,
+  spend,
+  STRING(actions.action_type) AS attribute_name,
+  STRING(actions.value) AS attribute_value
+FROM `facebook_cabinets_iov.export_facebook_cabinates_iov`,
+UNNEST(JSON_QUERY_ARRAY(actions)) AS actions
+)
+SELECT * FROM pivoting_subquery
+PIVOT(
+  ANY_VALUE(attribute_value)
+  FOR attribute_name is not null
+);
