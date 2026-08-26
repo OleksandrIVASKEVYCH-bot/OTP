@@ -1,58 +1,87 @@
+WITH base AS (
+  SELECT
+    PARSE_DATE('%Y%m%d', event_date) AS date,
+    user_pseudo_id,
+
+    (
+      SELECT value.int_value
+      FROM UNNEST(event_params)
+      WHERE key = 'ga_session_id'
+    ) AS ga_session_id,
+
+    event_name,
+
+    collected_traffic_source.manual_source AS source,
+    collected_traffic_source.manual_medium AS medium,
+    collected_traffic_source.manual_campaign_name AS campaign_name,
+    collected_traffic_source.manual_campaign_id AS campaign_id,
+    collected_traffic_source.gclid AS gclid,
+    collected_traffic_source.dclid AS dclid
+
+  FROM `project.dataset.events_*`
+
+  WHERE _TABLE_SUFFIX BETWEEN '20260810' AND '20260811'
+),
+
+sessions AS (
+  SELECT
+    date,
+    user_pseudo_id,
+    ga_session_id,
+
+    MAX(
+      IF(
+        event_name = 'session_start'
+        AND (
+          source IS NOT NULL
+          OR medium IS NOT NULL
+          OR gclid IS NOT NULL
+          OR dclid IS NOT NULL
+        ),
+        1,
+        0
+      )
+    ) AS source_on_session_start,
+
+    MAX(
+      IF(
+        source IS NOT NULL
+        OR medium IS NOT NULL
+        OR gclid IS NOT NULL
+        OR dclid IS NOT NULL,
+        1,
+        0
+      )
+    ) AS source_anywhere_in_session
+
+  FROM base
+
+  WHERE ga_session_id IS NOT NULL
+
+  GROUP BY 1,2,3
+)
+
 SELECT
-  date,
-  'meta' AS source,
-  CAST(campaign_id AS STRING) AS campaign_id,
-  campaign_name,
-  impressions,
-  clicks,
-  spend
-FROM `project.dataset.meta_table`
+  CASE
+    WHEN source_on_session_start = 1
+      THEN 'Source on session_start'
 
-UNION ALL
+    WHEN source_on_session_start = 0
+         AND source_anywhere_in_session = 1
+      THEN 'Source found later in session'
 
-SELECT
-  date,
-  'google_ads' AS source,
-  CAST(campaign_id AS STRING) AS campaign_id,
-  campaign_name,
-  impressions,
-  clicks,
-  spend
-FROM `project.dataset.google_ads_table`
+    ELSE 'No source anywhere in session'
+  END AS attribution_status,
 
+  COUNT(*) AS sessions,
 
-SELECT
-  date,
-  source,
-  campaign_id,
-  SUM(sessions) AS sessions,
-  SUM(purchases) AS purchases,
-  SUM(revenue) AS revenue
-FROM `project.dataset.ga4_table`
-GROUP BY 1,2,3
+  ROUND(
+    100 * COUNT(*) / SUM(COUNT(*)) OVER (),
+    2
+  ) AS percent
 
+FROM sessions
 
-SELECT
-  ads.date,
-  ads.source,
-  ads.campaign_id,
-  ads.campaign_name,
-  ads.impressions,
-  ads.clicks,
-  ads.spend,
+GROUP BY 1
 
-  ga4.sessions,
-  ga4.purchases,
-  ga4.revenue,
-
-  SAFE_DIVIDE(ads.clicks, ads.impressions) AS ctr,
-  SAFE_DIVIDE(ads.spend, ads.clicks) AS cpc,
-  SAFE_DIVIDE(ads.spend, ga4.purchases) AS cpa,
-  SAFE_DIVIDE(ga4.revenue, ads.spend) AS roas
-
-FROM `project.dataset.ads_normalized` ads
-
-LEFT JOIN `project.dataset.ga4_normalized` ga4
-  ON ads.date = ga4.date
-  AND ads.source = ga4.source
-  AND ads.campaign_id = ga4.campaign_id
+ORDER BY sessions DESC;
