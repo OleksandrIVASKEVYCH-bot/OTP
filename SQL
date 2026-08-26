@@ -1,26 +1,121 @@
-ga4_raw as (
-select
-  parse_date('%Y%m%d', event_date) as date
-  ,collected_traffic_source.manual_source as source
-  ,collected_traffic_source.manual_medium as medium
-  ,collected_traffic_source.manual_campaign_name as campaign_name
-  ,collected_traffic_source.manual_campaign_id as campaign_id
-  ,collected_traffic_source.gclid as gclid
-  ,SUM(sessions) as sessions
-  ,SUM(purchases) AS purchases
-  ,SUM(revenue) AS revenue
-from `analytics_250473208.events_*`
--- where _table_suffix between '20260801' and '20260826'
-group by 1,2,3,4,5,6
+ga4_events AS (
+  SELECT
+    PARSE_DATE('%Y%m%d', event_date) AS date,
+    event_timestamp,
+    user_pseudo_id,
+
+    (
+      SELECT ep.value.int_value
+      FROM UNNEST(event_params) ep
+      WHERE ep.key = 'ga_session_id'
+    ) AS ga_session_id,
+
+    event_name,
+
+    collected_traffic_source.manual_source AS source,
+    collected_traffic_source.manual_medium AS medium,
+    collected_traffic_source.manual_campaign_name AS campaign_name,
+    collected_traffic_source.manual_campaign_id AS campaign_id,
+    collected_traffic_source.gclid AS gclid,
+
+    ecommerce.purchase_revenue AS purchase_revenue
+
+  FROM `analytics_250473208.events_*`
+
+  -- WHERE _TABLE_SUFFIX BETWEEN '20260801' AND '20260826'
 ),
-ga4_aggregated as (
-SELECT
-  date
-  ,concat(source,'/', medium) as source_medium
-  ,campaign_id
-  ,SUM(sessions) AS sessions
-  ,SUM(purchases) AS purchases
-  ,SUM(revenue) AS revenue
-FROM ga4_raw
-GROUP BY 1,2,3
+
+ga4_sessions AS (
+  SELECT
+    date,
+    user_pseudo_id,
+    ga_session_id,
+
+    -- Беремо attribution з першого event у сесії,
+    -- де вона реально з'явилась
+    ARRAY_AGG(
+      IF(
+        source IS NOT NULL
+        OR medium IS NOT NULL
+        OR campaign_name IS NOT NULL
+        OR campaign_id IS NOT NULL
+        OR gclid IS NOT NULL,
+
+        STRUCT(
+          source AS source,
+          medium AS medium,
+          campaign_name AS campaign_name,
+          campaign_id AS campaign_id,
+          gclid AS gclid
+        ),
+
+        NULL
+      )
+      IGNORE NULLS
+      ORDER BY event_timestamp
+      LIMIT 1
+    )[SAFE_OFFSET(0)] AS attribution,
+
+    COUNTIF(event_name = 'purchase') AS purchases,
+
+    SUM(
+      CASE
+        WHEN event_name = 'purchase'
+        THEN COALESCE(purchase_revenue, 0)
+        ELSE 0
+      END
+    ) AS revenue
+
+  FROM ga4_events
+
+  WHERE ga_session_id IS NOT NULL
+
+  GROUP BY
+    date,
+    user_pseudo_id,
+    ga_session_id
+),
+
+ga4_raw AS (
+  SELECT
+    date,
+
+    attribution.source AS source,
+    attribution.medium AS medium,
+    attribution.campaign_name AS campaign_name,
+    attribution.campaign_id AS campaign_id,
+    attribution.gclid AS gclid,
+
+    COUNT(*) AS sessions,
+    SUM(purchases) AS purchases,
+    SUM(revenue) AS revenue
+
+  FROM ga4_sessions
+
+  GROUP BY
+    1,2,3,4,5,6
+),
+
+ga4_aggregated AS (
+  SELECT
+    date,
+
+    CONCAT(
+      COALESCE(source, '(direct)'),
+      '/',
+      COALESCE(medium, '(none)')
+    ) AS source_medium,
+
+    campaign_id,
+
+    ANY_VALUE(campaign_name) AS campaign_name,
+
+    SUM(sessions) AS sessions,
+    SUM(purchases) AS purchases,
+    SUM(revenue) AS revenue
+
+  FROM ga4_raw
+
+  GROUP BY
+    1,2,3
 )
