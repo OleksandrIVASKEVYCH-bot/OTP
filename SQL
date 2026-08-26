@@ -1,19 +1,58 @@
-with pivoting_subquery as (
-SELECT 
+SELECT
   date,
-  account_id,
-  adset_name,
+  'meta' AS source,
+  CAST(campaign_id AS STRING) AS campaign_id,
   campaign_name,
-  clicks,
   impressions,
-  spend,
-  STRING(actions.action_type) AS attribute_name,
-  STRING(actions.value) AS attribute_value
-FROM `facebook_cabinets_iov.export_facebook_cabinates_iov`,
-UNNEST(JSON_QUERY_ARRAY(actions)) AS actions
-)
-SELECT * FROM pivoting_subquery
-PIVOT(
-  ANY_VALUE(attribute_value)
-  FOR attribute_name is not null
-);
+  clicks,
+  spend
+FROM `project.dataset.meta_table`
+
+UNION ALL
+
+SELECT
+  date,
+  'google_ads' AS source,
+  CAST(campaign_id AS STRING) AS campaign_id,
+  campaign_name,
+  impressions,
+  clicks,
+  spend
+FROM `project.dataset.google_ads_table`
+
+
+SELECT
+  date,
+  source,
+  campaign_id,
+  SUM(sessions) AS sessions,
+  SUM(purchases) AS purchases,
+  SUM(revenue) AS revenue
+FROM `project.dataset.ga4_table`
+GROUP BY 1,2,3
+
+
+SELECT
+  ads.date,
+  ads.source,
+  ads.campaign_id,
+  ads.campaign_name,
+  ads.impressions,
+  ads.clicks,
+  ads.spend,
+
+  ga4.sessions,
+  ga4.purchases,
+  ga4.revenue,
+
+  SAFE_DIVIDE(ads.clicks, ads.impressions) AS ctr,
+  SAFE_DIVIDE(ads.spend, ads.clicks) AS cpc,
+  SAFE_DIVIDE(ads.spend, ga4.purchases) AS cpa,
+  SAFE_DIVIDE(ga4.revenue, ads.spend) AS roas
+
+FROM `project.dataset.ads_normalized` ads
+
+LEFT JOIN `project.dataset.ga4_normalized` ga4
+  ON ads.date = ga4.date
+  AND ads.source = ga4.source
+  AND ads.campaign_id = ga4.campaign_id
