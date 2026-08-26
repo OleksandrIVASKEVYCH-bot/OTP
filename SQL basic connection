@@ -1,0 +1,141 @@
+with google_ads as (
+select
+  sq1.campaign_id
+  ,campaign_name
+  ,sq1.customer_id
+  ,sq1.segments_date as date
+  ,sum(metrics_clicks) as clicks
+  ,round(sum(metrics_impressions),2) as impressions
+  ,round(sum(metrics_cost_micros)/1000000,2) as spend
+  ,round(sum(metrics_conversions),2) as conversions
+  ,round(sum(metrics_conversions_value),2) as conversions_value
+from `google_ads_data.ads_CampaignBasicStats_5911949898` sq1
+left join `google_ads_data.ads_Campaign_5911949898` sq2 on sq1.campaign_id = sq2.campaign_id
+group by 1,2,3,4
+),
+meta_gads as (
+SELECT
+  date
+  ,'meta' AS source
+  ,CAST(campaign_id AS STRING) AS campaign_id
+  ,campaign_name
+  ,impressions
+  ,clicks
+  ,spend
+FROM `facebook_cabinets_iov.export_facebook_cabinates_iov`
+UNION ALL
+SELECT
+  date
+  ,'google_ads' AS source
+  ,CAST(campaign_id AS STRING) AS campaign_id
+  ,campaign_name
+  ,impressions
+  ,clicks
+  ,spend
+FROM google_ads
+),
+ga4_events AS (
+  SELECT
+    PARSE_DATE('%Y%m%d', event_date) AS date
+    ,event_timestamp
+    ,user_pseudo_id
+    ,(
+      SELECT ep.value.int_value
+      FROM UNNEST(event_params) ep
+      WHERE ep.key = 'ga_session_id'
+    ) AS ga_session_id
+    ,event_name
+    ,collected_traffic_source.manual_source AS source
+    ,collected_traffic_source.manual_medium AS medium
+    ,collected_traffic_source.manual_campaign_name AS campaign_name
+    ,collected_traffic_source.manual_campaign_id AS campaign_id
+    ,collected_traffic_source.gclid AS gclid
+    ,ecommerce.purchase_revenue AS purchase_revenue
+FROM `analytics_250473208.events_*`
+WHERE _TABLE_SUFFIX BETWEEN '20260801' AND '20260826' and PARSE_DATE('%Y%m%d', event_date) >= '2026-08-01'
+),
+ga4_sessions AS (
+SELECT
+    date
+    ,user_pseudo_id
+    ,ga_session_id
+    ,ARRAY_AGG(
+      IF(
+        source IS NOT NULL
+        OR medium IS NOT NULL
+        OR campaign_name IS NOT NULL
+        OR campaign_id IS NOT NULL
+        OR gclid IS NOT NULL,
+        STRUCT(
+          source AS source,
+          medium AS medium,
+          campaign_name AS campaign_name,
+          campaign_id AS campaign_id,
+          gclid AS gclid
+        ),
+        NULL
+      )
+      IGNORE NULLS
+      ORDER BY event_timestamp
+      LIMIT 1
+    )[SAFE_OFFSET(0)] AS attribution
+    ,COUNTIF(event_name = 'purchase') AS purchases
+    ,SUM(
+      CASE
+        WHEN event_name = 'purchase'
+        THEN COALESCE(purchase_revenue, 0)
+        ELSE 0
+      END
+    ) AS revenue
+FROM ga4_events
+WHERE ga_session_id IS NOT NULL
+  GROUP BY 1,2,3
+),
+ga4_raw AS (
+  SELECT
+    date
+    ,attribution.source AS source
+    ,attribution.medium AS medium
+    ,attribution.campaign_name AS campaign_name
+    ,attribution.campaign_id AS campaign_id
+    ,attribution.gclid AS gclid
+    ,COUNT(*) AS sessions
+    ,SUM(purchases) AS purchases
+    ,SUM(revenue) AS revenue
+FROM ga4_sessions
+GROUP BY
+    1,2,3,4,5,6
+),
+ga4_aggregated AS (
+SELECT
+    date
+    ,COALESCE(source, '(direct)')as source
+    ,campaign_id
+    ,ANY_VALUE(campaign_name) AS campaign_name
+    ,SUM(sessions) AS sessions
+    ,SUM(purchases) AS purchases
+    ,SUM(revenue) AS revenue
+FROM ga4_raw
+GROUP BY
+    1,2,3
+)
+SELECT
+  ads.date,
+  ads.source,
+  ads.campaign_id,
+  ads.campaign_name,
+  ads.impressions,
+  ads.clicks,
+  ads.spend,
+  ga4.sessions,
+  ga4.purchases,
+  ga4.revenue,
+  SAFE_DIVIDE(ads.clicks, ads.impressions) AS ctr,
+  SAFE_DIVIDE(ads.spend, ads.clicks) AS cpc,
+  SAFE_DIVIDE(ads.spend, ga4.purchases) AS cpa,
+  SAFE_DIVIDE(ga4.revenue, ads.spend) AS roas
+FROM meta_gads ads
+LEFT JOIN ga4_aggregated ga4
+  ON ads.date = ga4.date
+  AND ads.source = ga4.source
+  AND ads.campaign_id = ga4.campaign_id
