@@ -1,87 +1,26 @@
-WITH base AS (
-  SELECT
-    PARSE_DATE('%Y%m%d', event_date) AS date,
-    user_pseudo_id,
-
-    (
-      SELECT value.int_value
-      FROM UNNEST(event_params)
-      WHERE key = 'ga_session_id'
-    ) AS ga_session_id,
-
-    event_name,
-
-    collected_traffic_source.manual_source AS source,
-    collected_traffic_source.manual_medium AS medium,
-    collected_traffic_source.manual_campaign_name AS campaign_name,
-    collected_traffic_source.manual_campaign_id AS campaign_id,
-    collected_traffic_source.gclid AS gclid,
-    collected_traffic_source.dclid AS dclid
-
-  FROM `project.dataset.events_*`
-
-  WHERE _TABLE_SUFFIX BETWEEN '20260810' AND '20260811'
+ga4_raw as (
+select
+  parse_date('%Y%m%d', event_date) as date
+  ,collected_traffic_source.manual_source as source
+  ,collected_traffic_source.manual_medium as medium
+  ,collected_traffic_source.manual_campaign_name as campaign_name
+  ,collected_traffic_source.manual_campaign_id as campaign_id
+  ,collected_traffic_source.gclid as gclid
+  ,SUM(sessions) as sessions
+  ,SUM(purchases) AS purchases
+  ,SUM(revenue) AS revenue
+from `analytics_250473208.events_*`
+-- where _table_suffix between '20260801' and '20260826'
+group by 1,2,3,4,5,6
 ),
-
-sessions AS (
-  SELECT
-    date,
-    user_pseudo_id,
-    ga_session_id,
-
-    MAX(
-      IF(
-        event_name = 'session_start'
-        AND (
-          source IS NOT NULL
-          OR medium IS NOT NULL
-          OR gclid IS NOT NULL
-          OR dclid IS NOT NULL
-        ),
-        1,
-        0
-      )
-    ) AS source_on_session_start,
-
-    MAX(
-      IF(
-        source IS NOT NULL
-        OR medium IS NOT NULL
-        OR gclid IS NOT NULL
-        OR dclid IS NOT NULL,
-        1,
-        0
-      )
-    ) AS source_anywhere_in_session
-
-  FROM base
-
-  WHERE ga_session_id IS NOT NULL
-
-  GROUP BY 1,2,3
-)
-
+ga4_aggregated as (
 SELECT
-  CASE
-    WHEN source_on_session_start = 1
-      THEN 'Source on session_start'
-
-    WHEN source_on_session_start = 0
-         AND source_anywhere_in_session = 1
-      THEN 'Source found later in session'
-
-    ELSE 'No source anywhere in session'
-  END AS attribution_status,
-
-  COUNT(*) AS sessions,
-
-  ROUND(
-    100 * COUNT(*) / SUM(COUNT(*)) OVER (),
-    2
-  ) AS percent
-
-FROM sessions
-
-GROUP BY 1
-
-ORDER BY sessions DESC;
+  date
+  ,concat(source,'/', medium) as source_medium
+  ,campaign_id
+  ,SUM(sessions) AS sessions
+  ,SUM(purchases) AS purchases
+  ,SUM(revenue) AS revenue
+FROM ga4_raw
+GROUP BY 1,2,3
+)
