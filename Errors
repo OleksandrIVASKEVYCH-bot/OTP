@@ -1,31 +1,37 @@
-SELECT
-  CASE
+Через інтерфейс BigQuery
 
-    WHEN collected_traffic_source.gclid IS NOT NULL
-      THEN 'Google Ads (gclid)'
+У Google Cloud Console відкрий BigQuery і в Explorer знайди dataset, який створив для AppsFlyer, наприклад:
 
-    WHEN collected_traffic_source.dclid IS NOT NULL
-      THEN 'Google Ads (dclid)'
+твій_project
+└── appsflyer_raw
 
-    WHEN collected_traffic_source.manual_source IS NOT NULL
-      THEN 'Manual source / UTM'
+Натисни на appsflyer_raw, а далі:
 
-    ELSE 'No traffic parameters'
+Sharing → Permissions → Add principal. Саме такий порядок зараз описує Google для видачі IAM-прав на dataset.
 
-  END AS traffic_type,
+У полі New principals встав:
 
-  COUNT(*) AS sessions,
+datalocker-bq-admin-prod@datalocker-bq-prod.iam.gserviceaccount.com
 
-  ROUND(
-    COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (),
-    2
-  ) AS percent
+Це актуальний service account, який AppsFlyer вказує для Data Locker → BigQuery.
 
-FROM `project.dataset.events_*`
+У Assign roles → Select a role знайди:
 
-WHERE _TABLE_SUFFIX BETWEEN '20260810' AND '20260811'
-  AND event_name = 'session_start'
+BigQuery
+    → BigQuery Data Editor
 
-GROUP BY 1
+або через пошук:
 
-ORDER BY sessions DESC;
+BigQuery Data Editor
+
+Після цього натисни Save.
+
+У результаті має бути приблизно:
+
+Principal
+datalocker-bq-admin-prod@datalocker-bq-prod.iam.gserviceaccount.com
+
+Role
+BigQuery Data Editor
+
+AppsFlyer офіційно вимагає саме цю комбінацію для Data Locker → BigQuery.
