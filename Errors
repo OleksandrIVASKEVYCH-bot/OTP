@@ -1,37 +1,169 @@
-Через інтерфейс BigQuery
+Найкращий актуальний шлях — AppsFlyer Data Locker → BigQuery. Це нативний варіант для регулярного production-вивантаження, без проміжних CSV/API-скриптів. AppsFlyer прямо підтримує BigQuery як destination для Data Locker.
 
-У Google Cloud Console відкрий BigQuery і в Explorer знайди dataset, який створив для AppsFlyer, наприклад:
+Схема буде така:
 
-твій_project
-└── appsflyer_raw
+AppsFlyer
+   ↓
+Data Locker
+   ↓
+BigQuery dataset
+   ↓
+staging / fact tables
 
-Натисни на appsflyer_raw, а далі:
+У BigQuery спочатку створи окремий dataset, наприклад:
 
-Sharing → Permissions → Add principal. Саме такий порядок зараз описує Google для видачі IAM-прав на dataset.
+appsflyer_raw
 
-У полі New principals встав:
+Dataset має бути в проєкті з активним billing account, інакше AppsFlyer не зможе створювати та записувати таблиці.
+
+Після цього для dataset треба додати principal:
 
 datalocker-bq-admin-prod@datalocker-bq-prod.iam.gserviceaccount.com
 
-Це актуальний service account, який AppsFlyer вказує для Data Locker → BigQuery.
-
-У Assign roles → Select a role знайди:
-
-BigQuery
-    → BigQuery Data Editor
-
-або через пошук:
+і дати йому роль:
 
 BigQuery Data Editor
 
-Після цього натисни Save.
+AppsFlyer саме цей service account вказує у своїй актуальній документації для BigQuery Data Locker.
 
-У результаті має бути приблизно:
+Потім у AppsFlyer переходиш приблизно сюди:
 
-Principal
-datalocker-bq-admin-prod@datalocker-bq-prod.iam.gserviceaccount.com
+Reports
+→ Data Locker
+→ Add / New connection
+→ BigQuery
 
-Role
-BigQuery Data Editor
+і вказуєш:
 
-AppsFlyer офіційно вимагає саме цю комбінацію для Data Locker → BigQuery.
+Project ID: твій GCP project
+Dataset: appsflyer_raw
+
+Після створення connection вибираєш, які дані AppsFlyer має відправляти: apps, media sources, events та типи reports. Data Locker дозволяє це конфігурувати на рівні destination.
+
+Для твоєї задачі маркетингової аналітики я б насамперед дивився на raw user-level reports, а не лише aggregated reports. Тобі особливо потрібні установки та in-app events, бо тоді можна будувати:
+
+Meta / Google Ads spend
+        ↓
+AppsFlyer attribution
+        ↓
+install
+        ↓
+in-app events
+        ↓
+registration
+        ↓
+purchase / application / target event
+        ↓
+revenue
+
+Типова структура AppsFlyer, яку потім варто привести до staging, приблизно така:
+
+event_time
+install_time
+
+app_id
+media_source
+campaign
+campaign_id
+adset
+adset_id
+ad
+ad_id
+
+af_channel
+
+event_name
+event_value
+
+customer_user_id
+appsflyer_id
+
+platform
+country_code
+
+is_retargeting
+attribution_touch_type
+
+Точні назви залежать від обраного Data Locker report.
+
+Для твоєї поточної архітектури я б не JOIN'ив AppsFlyer raw напряму з Meta/Google Ads. Зробив би:
+
+appsflyer_raw.*
+      ↓
+stg_appsflyer_events
+      ↓
+appsflyer_campaign_daily
+
+з grain:
+
+date
+source
+campaign_id
+campaign_name
+
+installs
+registrations
+conversions
+revenue
+
+А потім уже:
+
+Meta Ads ──────┐
+               │
+Google Ads ────┼──→ ads_daily
+               │
+               └──── spend/clicks/impressions
+                       │
+                       │ date + source + campaign_id
+                       ▼
+              AppsFlyer campaign daily
+                       │
+                       ├── installs
+                       ├── registrations
+                       ├── purchases/events
+                       └── revenue
+
+У фіналі в тебе буде щось таке:
+
+date
+source
+campaign_id
+campaign_name
+
+impressions
+clicks
+spend
+
+installs
+registrations
+purchases
+revenue
+
+CPI
+CPA
+ROAS
+
+І тут AppsFlyer фактично краще використовувати як attribution source для app-реклами, а GA4 — окремо для web.
+
+Для AppsFlyer я б рекомендував Data Locker, а не писати свій AppsFlyer Pull API → Python → BigQuery, якщо у вашому тарифі Data Locker доступний. Це набагато простіше підтримувати, і AppsFlyer підтримує як hourly, так і daily типи delivery залежно від report.
+
+Є важливий нюанс: Data Locker for marketers позначений AppsFlyer як Premium. Тобто доступність залежить від вашого AppsFlyer plan.
+
+Якщо Data Locker у вашому акаунті недоступний, тоді другий варіант — AppsFlyer API → Cloud Run/Colab/Function → BigQuery. Але я б ішов ним лише якщо немає Data Locker.
+
+Для твоєї існуючої моделі Meta + Google Ads + GA4 найкраще буде додати AppsFlyer як четвертий нормалізований шар:
+
+stg_meta_ads
+stg_google_ads
+stg_ga4_sessions
+stg_appsflyer_events
+        ↓
+fact_marketing_daily
+
+і вже там розділяти:
+
+web conversions     → GA4
+app conversions     → AppsFlyer
+spend                → Meta / Google Ads
+
+AppsFlyer Data Locker setup for BigQuery
