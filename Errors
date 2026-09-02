@@ -1,25 +1,101 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from google.cloud import bigquery
 
 
 def run_meta_etl(
     account_ids,
-    date_from,
-    date_to
+    fallback_date_from=None
 ):
 
-    # Створить таблицю лише якщо її ще немає
+    # 1. Отримуємо існуючу таблицю
     table_ref = ensure_facebook_table()
 
-    current_date = datetime.strptime(
-        date_from,
-        "%Y-%m-%d"
+    # ----------------------------------------
+    # 2. Знаходимо максимальну дату в BigQuery
+    # ----------------------------------------
+
+    max_date_query = f"""
+        SELECT MAX(date) AS max_date
+        FROM `{table_ref.project}.{table_ref.dataset_id}.{table_ref.table_id}`
+    """
+
+    max_date_result = list(
+        bigquery_client.query(max_date_query).result()
     )
 
-    final_date = datetime.strptime(
-        date_to,
-        "%Y-%m-%d"
+    max_date = max_date_result[0].max_date
+
+    # ----------------------------------------
+    # 3. Визначаємо дату початку перезавантаження
+    # ----------------------------------------
+
+    if max_date is not None:
+
+        reload_from = max_date - timedelta(days=3)
+
+    else:
+
+        if fallback_date_from is None:
+            raise ValueError(
+                "Table is empty. "
+                "Specify fallback_date_from."
+            )
+
+        reload_from = datetime.strptime(
+            fallback_date_from,
+            "%Y-%m-%d"
+        ).date()
+
+    reload_to = date.today()
+
+    print()
+    print("=" * 60)
+    print(f"Max date in BigQuery: {max_date}")
+    print(f"Reload period: {reload_from} → {reload_to}")
+    print("=" * 60)
+
+    # ----------------------------------------
+    # 4. Видаляємо старі дані за refresh window
+    # ----------------------------------------
+
+    delete_query = f"""
+        DELETE FROM `{table_ref.project}.{table_ref.dataset_id}.{table_ref.table_id}`
+        WHERE date BETWEEN @date_from AND @date_to
+    """
+
+    delete_job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter(
+                "date_from",
+                "DATE",
+                reload_from
+            ),
+            bigquery.ScalarQueryParameter(
+                "date_to",
+                "DATE",
+                reload_to
+            )
+        ]
     )
 
+    delete_job = bigquery_client.query(
+        delete_query,
+        job_config=delete_job_config
+    )
+
+    delete_job.result()
+
+    print(
+        f"✓ Deleted existing data: "
+        f"{reload_from} → {reload_to}"
+    )
+
+    # ----------------------------------------
+    # 5. Починаємо повторне завантаження
+    # ----------------------------------------
+
+    current_date = reload_from
+    final_date = reload_to
 
     while current_date <= final_date:
 
@@ -34,7 +110,7 @@ def run_meta_etl(
 
         try:
 
-            # 1. Отримуємо дані Meta за конкретний день
+            # 6. Отримуємо Meta за один день
             df_day = load_meta_ads_one_day(
                 account_ids=account_ids,
                 current_date=date_str
@@ -48,7 +124,7 @@ def run_meta_etl(
 
             else:
 
-                # 2. Приводимо типи
+                # 7. Приводимо типи
                 df_day = prepare_meta_df(
                     df_day
                 )
@@ -82,10 +158,12 @@ def run_meta_etl(
                     f"{df_day['spend'].sum():,.2f}"
                 )
 
-                # 3. Завантажуємо цей день у BigQuery
+                # 8. Дозаписуємо у BigQuery
                 job_config = bigquery.LoadJobConfig(
                     schema=schema_facebook_stat,
-                    write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+                    write_disposition=(
+                        bigquery.WriteDisposition.WRITE_APPEND
+                    )
                 )
 
                 job = bigquery_client.load_table_from_dataframe(
@@ -115,3 +193,15 @@ def run_meta_etl(
             raise
 
         current_date += timedelta(days=1)
+
+    print()
+    print("=" * 60)
+    print("✓ Meta ETL completed")
+    print("=" * 60)
+
+++++++++++++++++++++++++++++++++++++++++++++++
+
+run_meta_etl(
+    account_ids=account_ids,
+    fallback_date_from="2026-01-01"
+)
