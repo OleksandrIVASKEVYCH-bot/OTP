@@ -1,24 +1,19 @@
+Ads
+ad_arbitrator_text_3
+ad_arbitrator_text_1
+ad_team_text_2
 
-❌ ERROR: 2026-08-21
-BadRequest: 400 POST https://bigquery.googleapis.com/upload/bigquery/v2/projects/crested-aquifer-142707/jobs?uploadType=multipart: Provided Schema does not match Table crested-aquifer-142707:facebook_cabinets_iov.export_facebook_cabinates_iov. Field date has changed mode from REQUIRED to NULLABLE
----------------------------------------------------------------------------
-InvalidResponse                           Traceback (most recent call last)
-/usr/local/lib/python3.13/dist-packages/google/cloud/bigquery/client.py in load_table_from_file(self, file_obj, destination, rewind, size, num_retries, job_id, job_id_prefix, location, project, job_config, timeout)
-   2725             else:
--> 2726                 response = self._do_multipart_upload(
-   2727                     file_obj, job_resource, size, num_retries, timeout, project=project
 
-10 frames
-InvalidResponse: ('Request failed with status code', 400, 'Expected one of', <HTTPStatus.OK: 200>)
-
-During handling of the above exception, another exception occurred:
-
-BadRequest                                Traceback (most recent call last)
-/usr/local/lib/python3.13/dist-packages/google/cloud/bigquery/client.py in load_table_from_file(self, file_obj, destination, rewind, size, num_retries, job_id, job_id_prefix, location, project, job_config, timeout)
-   2728                 )
-   2729         except resumable_media.InvalidResponse as exc:
--> 2730             raise exceptions.from_http_response(exc.response)
-   2731 
-   2732         return typing.cast(LoadJob, self.job_from_resource(response.json()))
-
-BadRequest: 400 POST https://bigquery.googleapis.com/upload/bigquery/v2/projects/crested-aquifer-142707/jobs?uploadType=multipart: Provided Schema does not match Table crested-aquifer-142707:facebook_cabinets_iov.export_facebook_cabinates_iov. Field date has changed mode from REQUIRED to NULLABLE
+Object
+Не вболівай — забивай гол
+Старт сезону від OTP Bank
+Годі просто дивитися! Грай
+Виходь на поле в першому турі
+Виходь на поле з OTP Bank.
+Завантажуй застосунок, відкривай картку та виконуй умови Турніру 1
+Досить просто дивитися футбол та відкривай кредитну картку
+Сума до 200 тис. грн до 12 міс, з пільговим періодом до 62 днів, РРПС - 47,64% річних
+https://tpc.googlesyndication.com/simgad/7152759435343158777
+https://tpc.googlesyndication.com/simgad/2118086056704390375
+Google
+Meta
