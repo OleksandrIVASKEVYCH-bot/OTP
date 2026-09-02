@@ -1,169 +1,117 @@
-Найкращий актуальний шлях — AppsFlyer Data Locker → BigQuery. Це нативний варіант для регулярного production-вивантаження, без проміжних CSV/API-скриптів. AppsFlyer прямо підтримує BigQuery як destination для Data Locker.
+from datetime import datetime, timedelta
 
-Схема буде така:
 
-AppsFlyer
-   ↓
-Data Locker
-   ↓
-BigQuery dataset
-   ↓
-staging / fact tables
+def run_meta_etl(
+    account_ids,
+    date_from,
+    date_to
+):
 
-У BigQuery спочатку створи окремий dataset, наприклад:
+    # Створить таблицю лише якщо її ще немає
+    table_ref = ensure_facebook_table()
 
-appsflyer_raw
+    current_date = datetime.strptime(
+        date_from,
+        "%Y-%m-%d"
+    )
 
-Dataset має бути в проєкті з активним billing account, інакше AppsFlyer не зможе створювати та записувати таблиці.
+    final_date = datetime.strptime(
+        date_to,
+        "%Y-%m-%d"
+    )
 
-Після цього для dataset треба додати principal:
 
-datalocker-bq-admin-prod@datalocker-bq-prod.iam.gserviceaccount.com
+    while current_date <= final_date:
 
-і дати йому роль:
+        date_str = current_date.strftime(
+            "%Y-%m-%d"
+        )
 
-BigQuery Data Editor
+        print()
+        print("=" * 60)
+        print(f"Processing: {date_str}")
+        print("=" * 60)
 
-AppsFlyer саме цей service account вказує у своїй актуальній документації для BigQuery Data Locker.
+        try:
 
-Потім у AppsFlyer переходиш приблизно сюди:
+            # 1. Отримуємо дані Meta за конкретний день
+            df_day = load_meta_ads_one_day(
+                account_ids=account_ids,
+                current_date=date_str
+            )
 
-Reports
-→ Data Locker
-→ Add / New connection
-→ BigQuery
+            if df_day.empty:
 
-і вказуєш:
+                print(
+                    f"⏹ No Meta data for {date_str}"
+                )
 
-Project ID: твій GCP project
-Dataset: appsflyer_raw
+            else:
 
-Після створення connection вибираєш, які дані AppsFlyer має відправляти: apps, media sources, events та типи reports. Data Locker дозволяє це конфігурувати на рівні destination.
+                # 2. Приводимо типи
+                df_day = prepare_meta_df(
+                    df_day
+                )
 
-Для твоєї задачі маркетингової аналітики я б насамперед дивився на raw user-level reports, а не лише aggregated reports. Тобі особливо потрібні установки та in-app events, бо тоді можна будувати:
+                print(
+                    f"Rows: {len(df_day)}"
+                )
 
-Meta / Google Ads spend
-        ↓
-AppsFlyer attribution
-        ↓
-install
-        ↓
-in-app events
-        ↓
-registration
-        ↓
-purchase / application / target event
-        ↓
-revenue
+                print(
+                    f"Accounts: "
+                    f"{df_day['account_id'].nunique()}"
+                )
 
-Типова структура AppsFlyer, яку потім варто привести до staging, приблизно така:
+                print(
+                    f"Campaigns: "
+                    f"{df_day['campaign_id'].nunique()}"
+                )
 
-event_time
-install_time
+                print(
+                    f"Adsets: "
+                    f"{df_day['adset_id'].nunique()}"
+                )
 
-app_id
-media_source
-campaign
-campaign_id
-adset
-adset_id
-ad
-ad_id
+                print(
+                    f"Ads: "
+                    f"{df_day['ad_id'].nunique()}"
+                )
 
-af_channel
+                print(
+                    f"Spend: "
+                    f"{df_day['spend'].sum():,.2f}"
+                )
 
-event_name
-event_value
+                # 3. Завантажуємо цей день у BigQuery
+                job_config = bigquery.LoadJobConfig(
+                    schema=schema_facebook_stat,
+                    write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+                )
 
-customer_user_id
-appsflyer_id
+                job = bigquery_client.load_table_from_dataframe(
+                    df_day,
+                    table_ref,
+                    job_config=job_config
+                )
 
-platform
-country_code
+                job.result()
 
-is_retargeting
-attribution_touch_type
+                print(
+                    f"✓ Uploaded {len(df_day)} rows"
+                )
 
-Точні назви залежать від обраного Data Locker report.
+                print(
+                    f"✓ Completed: {date_str}"
+                )
 
-Для твоєї поточної архітектури я б не JOIN'ив AppsFlyer raw напряму з Meta/Google Ads. Зробив би:
+        except Exception as e:
 
-appsflyer_raw.*
-      ↓
-stg_appsflyer_events
-      ↓
-appsflyer_campaign_daily
+            print(
+                f"❌ ERROR {date_str}"
+            )
 
-з grain:
+            print(e)
 
-date
-source
-campaign_id
-campaign_name
+            raise
 
-installs
-registrations
-conversions
-revenue
-
-А потім уже:
-
-Meta Ads ──────┐
-               │
-Google Ads ────┼──→ ads_daily
-               │
-               └──── spend/clicks/impressions
-                       │
-                       │ date + source + campaign_id
-                       ▼
-              AppsFlyer campaign daily
-                       │
-                       ├── installs
-                       ├── registrations
-                       ├── purchases/events
-                       └── revenue
-
-У фіналі в тебе буде щось таке:
-
-date
-source
-campaign_id
-campaign_name
-
-impressions
-clicks
-spend
-
-installs
-registrations
-purchases
-revenue
-
-CPI
-CPA
-ROAS
-
-І тут AppsFlyer фактично краще використовувати як attribution source для app-реклами, а GA4 — окремо для web.
-
-Для AppsFlyer я б рекомендував Data Locker, а не писати свій AppsFlyer Pull API → Python → BigQuery, якщо у вашому тарифі Data Locker доступний. Це набагато простіше підтримувати, і AppsFlyer підтримує як hourly, так і daily типи delivery залежно від report.
-
-Є важливий нюанс: Data Locker for marketers позначений AppsFlyer як Premium. Тобто доступність залежить від вашого AppsFlyer plan.
-
-Якщо Data Locker у вашому акаунті недоступний, тоді другий варіант — AppsFlyer API → Cloud Run/Colab/Function → BigQuery. Але я б ішов ним лише якщо немає Data Locker.
-
-Для твоєї існуючої моделі Meta + Google Ads + GA4 найкраще буде додати AppsFlyer як четвертий нормалізований шар:
-
-stg_meta_ads
-stg_google_ads
-stg_ga4_sessions
-stg_appsflyer_events
-        ↓
-fact_marketing_daily
-
-і вже там розділяти:
-
-web conversions     → GA4
-app conversions     → AppsFlyer
-spend                → Meta / Google Ads
-
-AppsFlyer Data Locker setup for BigQuery
+        current_date += timedelta(days=1)
