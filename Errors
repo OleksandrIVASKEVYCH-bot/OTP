@@ -1,43 +1,207 @@
-with raw_ga4 as (
-SELECT
-    event_date
-    ,event_timestamp
-    ,event_name
-    ,user_pseudo_id
-    ,device.category AS device_category
-    ,device.web_info.browser AS browser
-    ,case when user_id is null then user_pseudo_id
-    else user_id end user_id
-    ,collected_traffic_source.manual_source AS manual_source
-    ,collected_traffic_source.manual_medium AS manual_medium
-    ,collected_traffic_source.manual_campaign_name AS manual_campaign_name
-    ,collected_traffic_source.gclid AS gclid
-    ,collected_traffic_source.dclid AS dclid
-    ,traffic_source.source AS first_user_source
-    ,traffic_source.medium AS first_user_medium
-    ,traffic_source.name AS first_user_campaign
-from`analytics_250473208.events_*`
-  where _table_suffix >= '20260501'
-),
-sessions_substitute as (
-select
-  event_timestamp
-  ,user_id
-  ,concatenate(user_id, cast(event_timestamp as string)) as session_id
-  ,lead(event_timestamp) over(partition by user_id) next_session_start
-from raw_ga4
-where event_name = 'session_start'
-),
-ga4_with_sessions as (
-select
-  raw_ga4.*
-  ,session_id
-from raw_ga4 rg
-left join sessions_substitute ss on rg.user_id = ss.user_id 
-    and ss.event_timestamp>= rg.event_timestamp 
-    and ss.next_session_start< rg.event_timestamp
-
-)
-select
-*
-from ga4_with_sessions
+Field name
+Type
+Mode
+Description
+Key
+Collation
+Default Value
+Data Governance Tags
+Policy Tags 
+Data Policies
+ad_group_id
+INTEGER	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+campaign_id
+INTEGER	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_gclid
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+customer_id
+INTEGER	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+ad_group_status
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_ad_group_ad
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_area_of_interest_city
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_area_of_interest_country
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_area_of_interest_metro
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_area_of_interest_most_specific
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_area_of_interest_region
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_keyword
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_keyword_info_match_type
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_keyword_info_text
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_location_of_presence_city
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_location_of_presence_country
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_location_of_presence_metro
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_location_of_presence_most_specific
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_location_of_presence_region
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+click_view_page_number
+INTEGER	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+customer_descriptive_name
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+metrics_clicks
+INTEGER	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+segments_ad_network_type
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+segments_click_type
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+segments_date
+DATE	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+segments_device
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+segments_slot
+STRING	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+_LATEST_DATE
+DATE	NULLABLE	
+-
+-	-	-	
+-
+-	
+-
+_DATA_DATE
