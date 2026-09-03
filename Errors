@@ -1,19 +1,13 @@
-This query will process 104.16 GB when run.
+with raw_ga4 as (
 SELECT
     event_date
     ,event_timestamp
     ,event_name
     ,user_pseudo_id
-    ,(
-      SELECT value.int_value
-      FROM UNNEST(event_params)
-      WHERE key = 'ga_session_id'
-    ) AS ga_session_id
-    ,(
-      SELECT value.string_value
-      FROM UNNEST(event_params)
-      WHERE key = 'page_location'
-    ) AS page_location
+    ,device.category AS device_category
+    ,device.web_info.browser AS browser
+    ,case when user_id is null then user_pseudo_id
+    else user_id end user_id
     ,collected_traffic_source.manual_source AS manual_source
     ,collected_traffic_source.manual_medium AS manual_medium
     ,collected_traffic_source.manual_campaign_name AS manual_campaign_name
@@ -23,5 +17,27 @@ SELECT
     ,traffic_source.medium AS first_user_medium
     ,traffic_source.name AS first_user_campaign
 from`analytics_250473208.events_*`
-  where _table_suffix >= '20260901' 
-    and (collected_traffic_source.manual_campaign_name like "%b2c%" or collected_traffic_source.manual_campaign_name like "%azk%")
+  where _table_suffix >= '20260501'
+),
+sessions_substitute as (
+select
+  event_timestamp
+  ,user_id
+  ,concatenate(user_id, cast(event_timestamp as string)) as session_id
+  ,lead(event_timestamp) over(partition by user_id) next_session_start
+from raw_ga4
+where event_name = 'session_start'
+),
+ga4_with_sessions as (
+select
+  raw_ga4.*
+  ,session_id
+from raw_ga4 rg
+left join sessions_substitute ss on rg.user_id = ss.user_id 
+    and ss.event_timestamp>= rg.event_timestamp 
+    and ss.next_session_start< rg.event_timestamp
+
+)
+select
+*
+from ga4_with_sessions
