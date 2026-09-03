@@ -1,207 +1,591 @@
-Field name
-Type
-Mode
-Description
-Key
-Collation
-Default Value
-Data Governance Tags
-Policy Tags 
-Data Policies
-ad_group_id
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-campaign_id
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_gclid
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-customer_id
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-ad_group_status
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_ad_group_ad
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_area_of_interest_city
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_area_of_interest_country
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_area_of_interest_metro
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_area_of_interest_most_specific
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_area_of_interest_region
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_keyword
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_keyword_info_match_type
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_keyword_info_text
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_location_of_presence_city
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_location_of_presence_country
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_location_of_presence_metro
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_location_of_presence_most_specific
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_location_of_presence_region
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-click_view_page_number
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-customer_descriptive_name
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_clicks
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-segments_ad_network_type
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-segments_click_type
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-segments_date
-DATE	NULLABLE	
--
--	-	-	
--
--	
--
-segments_device
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-segments_slot
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-_LATEST_DATE
-DATE	NULLABLE	
--
--	-	-	
--
--	
--
-_DATA_DATE
+!pip install -q facebook_business
+
+import pandas as pd
+
+from datetime import datetime, timedelta, date
+
+from google.colab import auth
+from google.cloud import bigquery
+from google.cloud.exceptions import NotFound
+
+from facebook_business.api import FacebookAdsApi
+from facebook_business.adobjects.adaccount import AdAccount
+from facebook_business.adobjects.adsinsights import AdsInsights
+
+
+# =========================================================
+# CONFIG
+# =========================================================
+
+PROJECT_ID = "crested-aquifer-142707"
+DATASET_ID = "facebook_cabinets_iov"
+TABLE_ID = "export_facebook_cabinates_iov"
+
+TABLE_REF = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+
+ACCOUNT_IDS = [
+    "act_508657446714126",
+    "act_394796152401096"
+]
+
+FALLBACK_DATE_FROM = "2026-01-01"
+LOOKBACK_DAYS = 3
+
+
+# =========================================================
+# AUTH
+# =========================================================
+
+auth.authenticate_user()
+
+bigquery_client = bigquery.Client(
+    project=PROJECT_ID
+)
+
+print("BigQuery project:", bigquery_client.project)
+
+ACCESS_TOKEN = input(
+    "Встав Meta Access Token: "
+).strip()
+
+FacebookAdsApi.init(
+    access_token=ACCESS_TOKEN
+)
+
+print("✓ Meta API initialized")
+
+
+# =========================================================
+# BIGQUERY SCHEMA
+# =========================================================
+
+schema_facebook_stat = [
+
+    bigquery.SchemaField("date", "DATE", mode = "REQUIRED"),
+
+    bigquery.SchemaField("account_id", "INTEGER", mode = "REQUIRED"),
+
+    bigquery.SchemaField("ad_id", "INTEGER", mode = "REQUIRED"),
+    bigquery.SchemaField("ad_name", "STRING", mode = "REQUIRED"),
+
+    bigquery.SchemaField("adset_id", "INTEGER", mode = "REQUIRED"),
+    bigquery.SchemaField("adset_name", "STRING", mode = "REQUIRED"),
+
+    bigquery.SchemaField("campaign_id", "INTEGER", mode = "REQUIRED"),
+    bigquery.SchemaField("campaign_name", "STRING", mode = "REQUIRED"),
+
+    bigquery.SchemaField("clicks", "INTEGER", mode = "REQUIRED"),
+    bigquery.SchemaField("impressions", "INTEGER", mode = "REQUIRED"),
+
+    bigquery.SchemaField("spend", "FLOAT", mode = "REQUIRED"),
+
+    bigquery.SchemaField(
+        "conversions",
+        "RECORD",
+        mode="REPEATED",
+        fields=[
+            bigquery.SchemaField("action_type", "STRING"),
+            bigquery.SchemaField("value", "STRING"),
+        ]
+    ),
+
+    bigquery.SchemaField(
+        "actions",
+        "RECORD",
+        mode="REPEATED",
+        fields=[
+            bigquery.SchemaField("action_type", "STRING"),
+            bigquery.SchemaField("value", "STRING"),
+        ]
+    ),
+
+    bigquery.SchemaField("country", "STRING"),
+]
+
+
+# =========================================================
+# TABLE
+# =========================================================
+
+def ensure_facebook_table():
+
+    try:
+
+        bigquery_client.get_table(
+            TABLE_REF
+        )
+
+        print(
+            f"✓ Table already exists: {TABLE_REF}"
+        )
+
+    except NotFound:
+
+        table = bigquery.Table(
+            TABLE_REF,
+            schema=schema_facebook_stat
+        )
+
+        table.time_partitioning = (
+            bigquery.TimePartitioning(
+                type_=bigquery.TimePartitioningType.DAY,
+                field="date"
+            )
+        )
+
+        table.clustering_fields = [
+            "account_id",
+            "campaign_id"
+        ]
+
+        bigquery_client.create_table(
+            table
+        )
+
+        print(
+            f"✓ Table created: {TABLE_REF}"
+        )
+
+    return TABLE_REF
+
+
+# =========================================================
+# LOAD META FOR ONE DAY
+# =========================================================
+
+def load_meta_ads_one_day(
+    account_ids,
+    current_date
+):
+
+    fields = [
+        AdsInsights.Field.date_start,
+        AdsInsights.Field.account_id,
+
+        AdsInsights.Field.ad_id,
+        AdsInsights.Field.ad_name,
+
+        AdsInsights.Field.adset_id,
+        AdsInsights.Field.adset_name,
+
+        AdsInsights.Field.campaign_id,
+        AdsInsights.Field.campaign_name,
+
+        AdsInsights.Field.clicks,
+        AdsInsights.Field.impressions,
+        AdsInsights.Field.spend,
+
+        AdsInsights.Field.conversions,
+        AdsInsights.Field.actions,
+    ]
+
+    params = {
+        "level": "ad",
+
+        "time_range": {
+            "since": current_date,
+            "until": current_date
+        },
+
+        "time_increment": 1,
+
+        "breakdowns": [
+            "country"
+        ],
+
+        "limit": 500
+    }
+
+    rows = []
+
+    for account_id in account_ids:
+
+        clean_account_id = (
+            str(account_id)
+            .replace("act_", "")
+        )
+
+        print(
+            f"  Meta account: {clean_account_id}"
+        )
+
+        account = AdAccount(
+            f"act_{clean_account_id}"
+        )
+
+        insights = account.get_insights(
+            fields=fields,
+            params=params
+        )
+
+        for item in insights:
+
+            rows.append({
+
+                "date":
+                    item.get("date_start"),
+
+                "account_id":
+                    item.get(
+                        "account_id",
+                        clean_account_id
+                    ),
+
+                "ad_id":
+                    item.get("ad_id"),
+
+                "ad_name":
+                    item.get("ad_name"),
+
+                "adset_id":
+                    item.get("adset_id"),
+
+                "adset_name":
+                    item.get("adset_name"),
+
+                "campaign_id":
+                    item.get("campaign_id"),
+
+                "campaign_name":
+                    item.get("campaign_name"),
+
+                "clicks":
+                    item.get("clicks", 0),
+
+                "impressions":
+                    item.get("impressions", 0),
+
+                "spend":
+                    item.get("spend", 0),
+
+                "conversions":
+                    item.get(
+                        "conversions",
+                        []
+                    ),
+
+                "actions":
+                    item.get(
+                        "actions",
+                        []
+                    ),
+
+                "country":
+                    item.get("country")
+            })
+
+    return pd.DataFrame(rows)
+
+
+# =========================================================
+# PREPARE DATAFRAME
+# =========================================================
+
+def prepare_meta_df(df):
+
+    if df.empty:
+        return df
+
+    df = df.copy()
+
+    df["date"] = pd.to_datetime(
+        df["date"],
+        errors="coerce"
+    ).dt.date
+
+    integer_columns = [
+        "account_id",
+        "ad_id",
+        "adset_id",
+        "campaign_id",
+        "clicks",
+        "impressions"
+    ]
+
+    for col in integer_columns:
+
+        df[col] = pd.to_numeric(
+            df[col],
+            errors="coerce"
+        ).astype("Int64")
+
+    df["spend"] = pd.to_numeric(
+        df["spend"],
+        errors="coerce"
+    ).fillna(0.0)
+
+    string_columns = [
+        "ad_name",
+        "adset_name",
+        "campaign_name",
+        "country"
+    ]
+
+    for col in string_columns:
+
+        df[col] = (
+            df[col]
+            .astype("string")
+        )
+
+    for col in [
+        "actions",
+        "conversions"
+    ]:
+
+        df[col] = df[col].apply(
+            lambda x:
+                x
+                if isinstance(x, list)
+                else []
+        )
+
+    return df
+
+
+# =========================================================
+# GET MAX DATE
+# =========================================================
+
+def get_max_date():
+
+    query = f"""
+        SELECT
+            MAX(date) AS max_date
+        FROM `{TABLE_REF}`
+    """
+
+    result = (
+        bigquery_client
+        .query(query)
+        .result()
+    )
+
+    row = next(iter(result))
+
+    return row.max_date
+
+
+# =========================================================
+# DELETE ONE DAY
+# =========================================================
+
+def delete_day_from_bigquery(
+    current_date
+):
+
+    query = f"""
+        DELETE FROM `{TABLE_REF}`
+        WHERE date = @current_date
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter(
+                "current_date",
+                "DATE",
+                current_date
+            )
+        ]
+    )
+
+    job = bigquery_client.query(
+        query,
+        job_config=job_config
+    )
+
+    job.result()
+
+
+# =========================================================
+# UPLOAD ONE DAY
+# =========================================================
+
+def upload_day_to_bigquery(
+    df
+):
+
+    job_config = bigquery.LoadJobConfig(
+
+        schema=schema_facebook_stat,
+
+        write_disposition=(
+            bigquery.WriteDisposition.WRITE_APPEND
+        )
+    )
+
+    job = (
+        bigquery_client
+        .load_table_from_dataframe(
+            df,
+            TABLE_REF,
+            job_config=job_config
+        )
+    )
+
+    job.result()
+
+
+# =========================================================
+# MAIN UPDATE
+# =========================================================
+
+def update_meta_table(
+    account_ids=ACCOUNT_IDS,
+    fallback_date_from=FALLBACK_DATE_FROM,
+    lookback_days=LOOKBACK_DAYS
+):
+
+    ensure_facebook_table()
+
+    max_date = get_max_date()
+
+    if max_date is None:
+
+        reload_from = datetime.strptime(
+            fallback_date_from,
+            "%Y-%m-%d"
+        ).date()
+
+    else:
+
+        reload_from = (
+            max_date
+            - timedelta(
+                days=lookback_days
+            )
+        )
+
+    reload_to = date.today()
+
+    print()
+    print("=" * 60)
+    print(
+        f"MAX date in BigQuery: {max_date}"
+    )
+    print(
+        f"Refresh period: "
+        f"{reload_from} → {reload_to}"
+    )
+    print("=" * 60)
+
+    current_date = reload_from
+
+    while current_date <= reload_to:
+
+        date_str = (
+            current_date
+            .strftime("%Y-%m-%d")
+        )
+
+        print()
+        print("=" * 60)
+        print(
+            f"Processing: {date_str}"
+        )
+        print("=" * 60)
+
+        try:
+
+            # 1. Спочатку отримуємо нові дані
+            df_day = load_meta_ads_one_day(
+                account_ids=account_ids,
+                current_date=date_str
+            )
+
+            # 2. Якщо Meta повернула порожній результат —
+            # існуючі дані не видаляємо
+            if df_day.empty:
+
+                print(
+                    f"⏹ No Meta data for {date_str}"
+                )
+
+                current_date += timedelta(
+                    days=1
+                )
+
+                continue
+
+            # 3. Типи
+            df_day = prepare_meta_df(
+                df_day
+            )
+
+            print(
+                f"Rows: {len(df_day):,}"
+            )
+
+            print(
+                f"Accounts: "
+                f"{df_day['account_id'].nunique():,}"
+            )
+
+            print(
+                f"Campaigns: "
+                f"{df_day['campaign_id'].nunique():,}"
+            )
+
+            print(
+                f"Adsets: "
+                f"{df_day['adset_id'].nunique():,}"
+            )
+
+            print(
+                f"Ads: "
+                f"{df_day['ad_id'].nunique():,}"
+            )
+
+            print(
+                f"Spend: "
+                f"{df_day['spend'].sum():,.2f}"
+            )
+
+            # 4. Тільки після успішного отримання
+            # видаляємо стару версію дня
+            delete_day_from_bigquery(
+                current_date
+            )
+
+            print(
+                f"✓ Deleted old data: {date_str}"
+            )
+
+            # 5. Записуємо оновлену версію
+            upload_day_to_bigquery(
+                df_day
+            )
+
+            print(
+                f"✓ Uploaded {len(df_day):,} rows"
+            )
+
+            print(
+                f"✓ Completed: {date_str}"
+            )
+
+        except Exception as e:
+
+            print()
+            print(
+                f"❌ ERROR: {date_str}"
+            )
+
+            print(
+                f"{type(e).__name__}: {e}"
+            )
+
+            raise
+
+        current_date += timedelta(
+            days=1
+        )
+
+    print()
+    print("=" * 60)
+    print(
+        "✓ Meta table update completed"
+    )
+    print("=" * 60)
+
+update_meta_table()
