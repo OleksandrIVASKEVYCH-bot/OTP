@@ -1,49 +1,87 @@
-with events as(
-select
-  appsflyer_id
-  ,sum(if (event_name ='marketing_activate_credit_limit',1,0)) marketing_activate_credit_limit
-  ,sum(if (event_name ='marketing_sign_contract_open_card_ladna',1,0)) marketing_sign_contract_open_card_ladna
-  ,sum(if (event_name ='sign_contract',1,0)) sign_contract
-from `appsflyer.inapps`
-group by 1
+WITH events AS (
+    SELECT
+        appsflyer_id,
+
+        COUNTIF(
+            event_name = 'marketing_activate_credit_limit'
+        ) AS marketing_activate_credit_limit,
+
+        COUNTIF(
+            event_name = 'marketing_sign_contract_open_card_ladna'
+        ) AS marketing_sign_contract_open_card_ladna,
+
+        COUNTIF(
+            event_name = 'sign_contract'
+        ) AS sign_contract
+
+    FROM `appsflyer.inapps`
+    GROUP BY appsflyer_id
 ),
-prepatation_data as (
-SELECT
-  e.event_name
-  ,PARSE_DATETIME('%Y-%m-%d %H:%M:%S',e.install_time) install_time
-  ,PARSE_DATETIME('%Y-%m-%d %H:%M:%S',e.event_time) event_time
-  ,e.media_source
-  ,e.appsflyer_id
-  ,e.platform
-  ,i.campaign
-  ,marketing_activate_credit_limit
-  ,marketing_sign_contract_open_card_ladna
-  ,sign_contract
-  ,i.af_ad_id
-  ,i.af_ad AS creative_name
-from `appsflyer.inapps` e
-Left JOIN `appsflyer.installs` i 
-    ON e.appsflyer_id = i.appsflyer_id
-Left join events ee on ee.appsflyer_id = i.appsflyer_id
-where i.campaign like ('%_nb%')
-),
-final as (
-select
-  event_name
-  ,media_source
-  ,platform
-  ,campaign
-  ,creative_name
-  ,cast (install_time as date) as install_date
-  ,af_ad_id creative_id
-  ,sum(marketing_activate_credit_limit) marketing_activate_credit_limit
-  ,sum(marketing_sign_contract_open_card_ladna) marketing_sign_contract_open_card_ladna
-  ,sum(sign_contract) sign_contract
-  ,sum(TIMESTAMP_DIFF(event_time, install_time, MINUTE)) AS minutes_to_event
-  ,count(appsflyer_id) as instals
-from prepatation_data
-group by 1,2,3,4,5,6,7
+
+preparation_data AS (
+    SELECT
+        i.appsflyer_id,
+
+        PARSE_DATETIME(
+            '%Y-%m-%d %H:%M:%S',
+            i.install_time
+        ) AS install_time,
+
+        i.media_source,
+        i.platform,
+        i.campaign,
+
+        i.af_ad_id,
+        i.af_ad AS creative_name,
+
+        COALESCE(
+            e.marketing_activate_credit_limit,
+            0
+        ) AS marketing_activate_credit_limit,
+
+        COALESCE(
+            e.marketing_sign_contract_open_card_ladna,
+            0
+        ) AS marketing_sign_contract_open_card_ladna,
+
+        COALESCE(
+            e.sign_contract,
+            0
+        ) AS sign_contract
+
+    FROM `appsflyer.installs` i
+
+    LEFT JOIN events e
+        ON i.appsflyer_id = e.appsflyer_id
+
+    WHERE REGEXP_CONTAINS(i.campaign, r'_nb')
 )
-select
-*
-from final
+
+SELECT
+    media_source,
+    platform,
+    campaign,
+    creative_name,
+    CAST(install_time AS DATE) AS install_date,
+    af_ad_id AS creative_id,
+
+    COUNT(DISTINCT appsflyer_id) AS installs,
+
+    SUM(marketing_activate_credit_limit)
+        AS marketing_activate_credit_limit,
+
+    SUM(marketing_sign_contract_open_card_ladna)
+        AS marketing_sign_contract_open_card_ladna,
+
+    SUM(sign_contract)
+        AS sign_contract
+
+FROM preparation_data
+
+GROUP BY
+    media_source,
+    platform,
+    campaign,
+    creative_name,
+    install_date,
+    creative_id;
