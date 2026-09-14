@@ -1,87 +1,20 @@
-WITH events AS (
-    SELECT
-        appsflyer_id,
-
-        COUNTIF(
-            event_name = 'marketing_activate_credit_limit'
-        ) AS marketing_activate_credit_limit,
-
-        COUNTIF(
-            event_name = 'marketing_sign_contract_open_card_ladna'
-        ) AS marketing_sign_contract_open_card_ladna,
-
-        COUNTIF(
-            event_name = 'sign_contract'
-        ) AS sign_contract
-
-    FROM `appsflyer.inapps`
-    GROUP BY appsflyer_id
-),
-
-preparation_data AS (
-    SELECT
-        i.appsflyer_id,
-
-        PARSE_DATETIME(
-            '%Y-%m-%d %H:%M:%S',
-            i.install_time
-        ) AS install_time,
-
-        i.media_source,
-        i.platform,
-        i.campaign,
-
-        i.af_ad_id,
-        i.af_ad AS creative_name,
-
-        COALESCE(
-            e.marketing_activate_credit_limit,
-            0
-        ) AS marketing_activate_credit_limit,
-
-        COALESCE(
-            e.marketing_sign_contract_open_card_ladna,
-            0
-        ) AS marketing_sign_contract_open_card_ladna,
-
-        COALESCE(
-            e.sign_contract,
-            0
-        ) AS sign_contract
-
-    FROM `appsflyer.installs` i
-
-    LEFT JOIN events e
-        ON i.appsflyer_id = e.appsflyer_id
-
-    WHERE REGEXP_CONTAINS(i.campaign, r'_nb')
+Campaign_Creative =
+DISTINCT (
+    UNION (
+        SELECTCOLUMNS (
+            'табл1',
+            "campaign_creative",
+                'табл1'[campaign_name] & "-" & 'табл1'[creative_id]
+        ),
+        SELECTCOLUMNS (
+            'табл2',
+            "campaign_creative",
+                'табл2'[campaign_name] & "-" & 'табл2'[creative_id]
+        ),
+        SELECTCOLUMNS (
+            'табл3',
+            "campaign_creative",
+                'табл3'[campaign_name] & "-" & 'табл3'[creative_id]
+        )
+    )
 )
-
-SELECT
-    media_source,
-    platform,
-    campaign,
-    creative_name,
-    CAST(install_time AS DATE) AS install_date,
-    af_ad_id AS creative_id,
-
-    COUNT(DISTINCT appsflyer_id) AS installs,
-
-    SUM(marketing_activate_credit_limit)
-        AS marketing_activate_credit_limit,
-
-    SUM(marketing_sign_contract_open_card_ladna)
-        AS marketing_sign_contract_open_card_ladna,
-
-    SUM(sign_contract)
-        AS sign_contract
-
-FROM preparation_data
-
-GROUP BY
-    media_source,
-    platform,
-    campaign,
-    creative_name,
-    install_date,
-    creative_id;
