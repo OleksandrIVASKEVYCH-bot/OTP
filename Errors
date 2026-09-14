@@ -1,19 +1,33 @@
-Ads
-ad_arbitrator_text_3
-ad_arbitrator_text_1
-ad_team_text_2
-
-
-Object
-Не вболівай — забивай гол
-Старт сезону від OTP Bank
-Годі просто дивитися! Грай
-Виходь на поле в першому турі
-Виходь на поле з OTP Bank.
-Завантажуй застосунок, відкривай картку та виконуй умови Турніру 1
-Досить просто дивитися футбол та відкривай кредитну картку
-Сума до 200 тис. грн до 12 міс, з пільговим періодом до 62 днів, РРПС - 47,64% річних
-https://tpc.googlesyndication.com/simgad/7152759435343158777
-https://tpc.googlesyndication.com/simgad/2118086056704390375
-Google
-Meta
+with 
+dictionaries_campaign as (
+select distinct
+  campaign_id
+  ,campaign_name
+from `google_ads_data.ads_Campaign_5911949898`
+where campaign_name like '%azk%' or campaign_name like '%b2s%'
+),
+dictionary_creatives as (
+select distinct
+  campaign_id
+  ,ad_group_ad_ad_image_ad_image_url as creative_url
+  ,ad_group_ad_ad_image_ad_name creative_name
+from `google_ads_data.p_ads_Ad_5911949898`
+where campaign_id in (select campaign_id from dictionaries_campaign)
+)
+SELECT
+  segments_date as date
+  ,case when campaign_name like '%azk%' then 'УкрНафта'
+    else 'Назад до школи'end as campaign_name
+  ,creative
+  ,'google' as source
+  -- ,creative_group
+  ,segments_device platorm
+  ,'android' as os
+  ,'UAH' as currency
+  ,sum(metrics_impressions) impressions
+  ,sum(metrics_clicks) clicks
+  ,round(sum(metrics_cost_micros)/1000000,2) as spend
+from `google_ads_data.ads_AdStats_5911949898`
+left join dictionary_creatives pa using(campaign_id)
+right join dictionaries_campaign ac using(campaign_id) 
+group by 1,2,3,4,5
