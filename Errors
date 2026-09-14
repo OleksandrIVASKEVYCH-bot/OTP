@@ -1,333 +1,49 @@
-Filter
-Field name
-Type
-Mode
-Description
-Key
-Collation
-Default Value
-Data Governance Tags
-Policy Tags 
-Data Policies
-ad_group_ad_ad_id
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-ad_group_id
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-campaign_id
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-customer_id
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-ad_group_ad_ad_group
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-ad_group_base_ad_group
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-campaign_base_campaign
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_active_view_cpm
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_active_view_ctr
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_active_view_impressions
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_active_view_measurability
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_active_view_measurable_cost_micros
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_active_view_measurable_impressions
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_active_view_viewability
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_average_cost
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_average_cpc
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_average_cpm
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_clicks
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_conversions
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_conversions_from_interactions_rate
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_conversions_value
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_cost_micros
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_cost_per_conversion
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_cost_per_current_model_attributed_conversion
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_ctr
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_current_model_attributed_conversions
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_gmail_forwards
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_gmail_saves
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_gmail_secondary_clicks
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_impressions
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_interaction_event_types
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_interaction_rate
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_interactions
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_value_per_conversion
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-metrics_value_per_current_model_attributed_conversion
-FLOAT	NULLABLE	
--
--	-	-	
--
--	
--
-segments_ad_network_type
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-segments_click_type
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-segments_date
-DATE	NULLABLE	
--
--	-	-	
--
--	
--
-segments_day_of_week
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-segments_device
-STRING	NULLABLE	
--
--	-	-	
--
--	
--
-segments_month
-DATE	NULLABLE	
--
--	-	-	
--
--	
--
-segments_quarter
-DATE	NULLABLE	
--
--	-	-	
--
--	
--
-segments_week
-DATE	NULLABLE	
--
--	-	-	
--
--	
--
-segments_year
-INTEGER	NULLABLE	
--
--	-	-	
--
--	
--
-_LATEST_DATE
-DATE	NULLABLE	
--
--	-	-	
--
--	
--
-_DATA_DATE
-DATE	NULLABLE	
--
--	-	-	
--
--	
--
+with events as(
+select
+  appsflyer_id
+  ,sum(if (event_name ='marketing_activate_credit_limit',1,0)) marketing_activate_credit_limit
+  ,sum(if (event_name ='marketing_sign_contract_open_card_ladna',1,0)) marketing_sign_contract_open_card_ladna
+  ,sum(if (event_name ='sign_contract',1,0)) sign_contract
+from `appsflyer.inapps`
+group by 1
+),
+prepatation_data as (
+SELECT
+  e.event_name
+  ,PARSE_DATETIME('%Y-%m-%d %H:%M:%S',e.install_time) install_time
+  ,PARSE_DATETIME('%Y-%m-%d %H:%M:%S',e.event_time) event_time
+  ,e.media_source
+  ,e.appsflyer_id
+  ,e.platform
+  ,i.campaign
+  ,marketing_activate_credit_limit
+  ,marketing_sign_contract_open_card_ladna
+  ,sign_contract
+  ,i.af_ad_id
+  ,i.af_ad AS creative_name
+from `appsflyer.inapps` e
+Left JOIN `appsflyer.installs` i 
+    ON e.appsflyer_id = i.appsflyer_id
+Left join events ee on ee.appsflyer_id = i.appsflyer_id
+where i.campaign like ('%_nb%')
+),
+final as (
+select
+  event_name
+  ,media_source
+  ,platform
+  ,campaign
+  ,creative_name
+  ,cast (install_time as date) as install_date
+  ,af_ad_id creative_id
+  ,sum(marketing_activate_credit_limit) marketing_activate_credit_limit
+  ,sum(marketing_sign_contract_open_card_ladna) marketing_sign_contract_open_card_ladna
+  ,sum(sign_contract) sign_contract
+  ,sum(TIMESTAMP_DIFF(event_time, install_time, MINUTE)) AS minutes_to_event
+  ,count(appsflyer_id) as instals
+from prepatation_data
+group by 1,2,3,4,5,6,7
+)
+select
+*
+from final
