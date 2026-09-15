@@ -1,8 +1,1 @@
-Creative_Name =
-COALESCE (
-    LOOKUPVALUE (
-        'табл4'[creative_name],
-        'табл4'[creative_id], 'Campaign_Creative'[creative_id]
-    ),
-    "Unknown"
-)
+--https://drive.google.com/file/d/11VYn0YXX5j0MgQDdCJsLzZjoybNa32No/view?usp=sharing_eil&ts=6a97ad1c
