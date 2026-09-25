@@ -1,1 +1,143 @@
 --https://drive.google.com/file/d/11VYn0YXX5j0MgQDdCJsLzZjoybNa32No/view?usp=sharing_eil&ts=6a97ad1c
+WITH events AS (
+    SELECT
+        event_date,
+        event_timestamp,
+        event_name,
+
+        user_id,
+        user_pseudo_id,
+
+        -- Session ID
+        (
+            SELECT value.int_value
+            FROM UNNEST(event_params)
+            WHERE key = 'ga_session_id'
+        ) AS ga_session_id,
+
+        -- URL сторінки
+        (
+            SELECT value.string_value
+            FROM UNNEST(event_params)
+            WHERE key = 'page_location'
+        ) AS page_location,
+
+        -- Link URL
+        (
+            SELECT value.string_value
+            FROM UNNEST(event_params)
+            WHERE key = 'link_url'
+        ) AS link_url,
+
+        -- Link text
+        (
+            SELECT value.string_value
+            FROM UNNEST(event_params)
+            WHERE key = 'link_text'
+        ) AS link_text,
+
+        -- Session-level attribution
+        session_traffic_source_last_click.cross_channel_campaign.source
+            AS session_source,
+
+        session_traffic_source_last_click.cross_channel_campaign.medium
+            AS session_medium,
+
+        session_traffic_source_last_click.cross_channel_campaign.campaign_name
+            AS session_campaign
+
+    FROM `PROJECT_ID.DATASET_ID.events_*`
+
+    WHERE _TABLE_SUFFIX BETWEEN '20260901' AND '20260925'
+),
+
+/* ---------------------------------------------------------
+   Визначаємо першу сторінку кожної сесії
+--------------------------------------------------------- */
+
+sessions AS (
+    SELECT
+        user_pseudo_id,
+        ga_session_id,
+
+        ARRAY_AGG(
+            STRUCT(
+                page_location,
+                event_timestamp
+            )
+            IGNORE NULLS
+            ORDER BY event_timestamp
+            LIMIT 1
+        )[SAFE_OFFSET(0)].page_location AS landing_page
+
+    FROM events
+
+    WHERE ga_session_id IS NOT NULL
+      AND page_location IS NOT NULL
+
+    GROUP BY
+        user_pseudo_id,
+        ga_session_id
+),
+
+/* ---------------------------------------------------------
+   Залишаємо тільки link_click
+--------------------------------------------------------- */
+
+link_clicks AS (
+    SELECT
+        e.user_id,
+        e.user_pseudo_id,
+        e.ga_session_id,
+
+        e.session_source,
+        e.session_medium,
+        e.session_campaign,
+
+        e.link_text,
+        e.link_url,
+
+        e.page_location AS click_page,
+
+        TIMESTAMP_MICROS(e.event_timestamp)
+            AS event_datetime
+
+    FROM events e
+
+    WHERE e.event_name = 'link_click'
+)
+
+/* ---------------------------------------------------------
+   RESULT
+--------------------------------------------------------- */
+
+SELECT
+    lc.user_id,
+    lc.user_pseudo_id,
+    lc.ga_session_id,
+
+    s.landing_page,
+
+    lc.session_source AS source,
+    lc.session_medium AS medium,
+    lc.session_campaign AS campaign,
+
+    lc.link_text,
+    lc.link_url,
+
+    lc.event_datetime
+
+FROM link_clicks lc
+
+JOIN sessions s
+    ON lc.user_pseudo_id = s.user_pseudo_id
+   AND lc.ga_session_id = s.ga_session_id
+
+WHERE
+    -- замінити на URL твого landing
+    STARTS_WITH(
+        s.landing_page,
+        'https://YOUR_DOMAIN.com/YOUR_LANDING'
+    )
+
+ORDER BY lc.event_datetime;
