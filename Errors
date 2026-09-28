@@ -1,18 +1,21 @@
 BEGIN
-  -- Step 1: Declare a variable and calculate the dynamic 3-day lookback threshold based on current table data
-  DECLARE lookback_timestamp TIMESTAMP;
-  SET lookback_timestamp = (
-    SELECT TIMESTAMP_SUB(MAX(event_datetime), INTERVAL 3 DAY) 
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE('UTC'), INTERVAL 3 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE('UTC'), INTERVAL 1 DAY);
+
+  -- Початкове завантаження з 2026-08-01.
+  IF NOT EXISTS (
+    SELECT 1
     FROM `crested-aquifer-142707.IOV_silver.landing`
-  );
-  -- Safety Fallback: If the target landing table is brand new/empty, fall back to your start date
-  IF lookback_timestamp IS NULL THEN
-    SET lookback_timestamp = TIMESTAMP('2026-08-01 00:00:00 UTC');
+    LIMIT 1
+  ) THEN
+    SET start_date = DATE '2026-08-01';
   END IF;
-  -- Step 2: Clear old records within the restream window to keep data completely clean
+
+  BEGIN TRANSACTION;
+
   DELETE FROM `crested-aquifer-142707.IOV_silver.landing`
-  WHERE event_datetime >= lookback_timestamp;
-  -- Step 3: Stream and write fresh records beginning precisely from our lookback timestamp
+  WHERE DATE(event_datetime, 'UTC') BETWEEN start_date AND end_date;
+
   INSERT INTO `crested-aquifer-142707.IOV_silver.landing` (
     event_datetime,
     user_id,
@@ -22,35 +25,28 @@ BEGIN
     click_hostname
   )
   SELECT
-      TIMESTAMP_MICROS(event_timestamp) AS event_datetime
-      , COALESCE(user_id, user_pseudo_id) AS user_id
-      , (
-          SELECT value.string_value
-          FROM UNNEST(event_params)
-          WHERE key = 'page_location'
-        ) AS page_location
-      , (
-          SELECT value.string_value
-          FROM UNNEST(event_params)
-          WHERE key = 'click_text'
-        ) AS click_text
-      , (
-          SELECT value.string_value
-          FROM UNNEST(event_params)
-          WHERE key = 'click_url'
-        ) AS click_url
-      , (
-          SELECT value.string_value
-          FROM UNNEST(event_params)
-          WHERE key = 'click_hostname'
-        ) AS click_hostname
-  FROM `crested-aquifer-142707.analytics_250473208.events_*`
-  WHERE _TABLE_SUFFIX BETWEEN FORMAT_TIMESTAMP('%Y%m%d', lookback_timestamp) AND '20260928'
-    AND event_name = 'all_click_site'
-    AND TIMESTAMP_MICROS(event_timestamp) >= lookback_timestamp -- Enforces precise lookback boundary
-    AND (
-          SELECT value.string_value
-          FROM UNNEST(event_params)
-          WHERE key = 'page_location'
-        ) LIKE '%/landing_page/cash-loan/%';
-COMMIT;
+    TIMESTAMP_MICROS(e.event_timestamp),
+    COALESCE(e.user_id, e.user_pseudo_id),
+    (SELECT ANY_VALUE(p.value.string_value)
+     FROM UNNEST(e.event_params) p WHERE p.key = 'page_location'),
+    (SELECT ANY_VALUE(p.value.string_value)
+     FROM UNNEST(e.event_params) p WHERE p.key = 'click_text'),
+    (SELECT ANY_VALUE(p.value.string_value)
+     FROM UNNEST(e.event_params) p WHERE p.key = 'click_url'),
+    (SELECT ANY_VALUE(p.value.string_value)
+     FROM UNNEST(e.event_params) p WHERE p.key = 'click_hostname')
+  FROM `crested-aquifer-142707.analytics_250473208.events_*` AS e
+  WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date)
+                          AND FORMAT_DATE('%Y%m%d', end_date)
+    AND e.event_name = 'all_click_site'
+    AND DATE(TIMESTAMP_MICROS(e.event_timestamp), 'UTC')
+        BETWEEN start_date AND end_date
+    AND EXISTS (
+      SELECT 1
+      FROM UNNEST(e.event_params) p
+      WHERE p.key = 'page_location'
+        AND p.value.string_value LIKE '%/landing_page/cash-loan/%'
+    );
+
+  COMMIT TRANSACTION;
+END;
