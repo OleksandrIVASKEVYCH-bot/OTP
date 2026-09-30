@@ -1,138 +1,1150 @@
-Так, за такого визначення метрики моя попередня критика щодо самого факту використання combined_id потребує уточнення. Твоя логіка дедуплікації загалом відповідає задачі, але в SQL усе одно є один важливий ризик.
-Ти фактично хочеш рахувати не кількість event'ів, а бінарні факти на сутність:
-Install = був хоча б один install
-Card = була хоча б одна marketing_sign_contract_open_card_ladna
-Limit = був хоча б один marketing_activate_credit_limit,
-        АЛЕ тільки якщо Card = TRUE
+SELECT
+    event_name,
 
-Тому SELECT DISTINCT combined_id, TRUE для картки та ліміту цілком логічний: 1, 5 чи 20 однакових event'ів дадуть один факт.
-І твоя конструкція:
-FROM ladna l
-LEFT JOIN activate_credit_row a USING (combined_id)
+    COUNT(*) AS event_rows,
 
-також правильно реалізує твою умову «ліміт без відкритої картки нас не цікавить». Користувач, який має activate_credit_limit, але не має sign_contract_open_card, взагалі не потрапить у activate_credit.
-А фінальний:
-WHERE marketing_sign_contract_open_card_ladna = TRUE
+    COUNT(DISTINCT appsflyer_id) AS unique_appsflyer_ids,
 
-ще раз обмежує результат тільки тими, хто відкрив картку.
-Але проблема combined_id залишається в іншому місці
-Припустимо:
-install:
-customer_user_id = NULL
-appsflyer_id = AF123
+    COUNT(DISTINCT customer_user_id) AS unique_customer_ids,
 
-card:
-customer_user_id = 777
-appsflyer_id = AF123
+    COUNT(DISTINCT CONCAT(
+        IFNULL(SAFE_CAST(customer_user_id AS STRING), ''),
+        '-',
+        IFNULL(SAFE_CAST(appsflyer_id AS STRING), '')
+    )) AS unique_combined_ids,
 
-limit:
-customer_user_id = 777
-appsflyer_id = AF123
+    ROUND(
+        SAFE_DIVIDE(
+            COUNT(*) - COUNT(DISTINCT CONCAT(
+                IFNULL(SAFE_CAST(customer_user_id AS STRING), ''),
+                '-',
+                IFNULL(SAFE_CAST(appsflyer_id AS STRING), '')
+            )),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS repeated_event_pct
 
-Тоді:
-install combined_id = "-AF123"
+FROM `appsflyer.inapps`
 
-card combined_id    = "777-AF123"
+WHERE event_name IN (
+    'marketing_sign_contract_open_card_ladna',
+    'marketing_activate_credit_limit'
+)SELECT
+    event_name,
 
-limit combined_id   = "777-AF123"
+    COUNT(*) AS total_events,
 
-card → limit прекрасно з'єднаються.
-Але install → card не з'єднаються, тому що ключ змінився після появи customer_user_id.
-Це важливо саме для твоєї задачі attribution до:
-media_source
-campaign
-creative_id
-creative_name
+    COUNTIF(appsflyer_id IS NULL) AS null_appsflyer_id,
 
-бо ці поля ти береш із appsflyer.installs.
-Тобто питання не в тому, скільки разів користувач встановив застосунок. Питання в тому, чи зможеш ти приклеїти факт відкриття картки до того install, з якого береш рекламну атрибуцію.
-Якщо ж у твоїх appsflyer.installs customer_user_id вже заповнений тим самим значенням, що й у inapps, тоді цей конкретний ризик зникає.
-Тому я б зараз не переписував query, а зробив один діагностичний тест: перевірив, яка частка customer_user_id IS NULL в installs і яка частка card events не знаходить свій combined_id в installs. Саме це покаже, чи твоя поточна схема реально втрачає картки. Якщо покажеш структуру/результат, дам коротку BigQuery query на цю перевірку.
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(appsflyer_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS null_appsflyer_id_pct
+
+FROM `appsflyer.inapps`
+
+WHERE event_name IN (
+    'marketing_sign_contract_open_card_ladna',
+    'marketing_activate_credit_limit'
+)
+
+GROUP BY 1;
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+SELECT
+    event_name,
+
+    COUNT(*) AS total_events,
+
+    COUNTIF(customer_user_id IS NULL) AS null_customer_user_id,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(customer_user_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS null_customer_user_id_pct
+
+FROM `appsflyer.inapps`
+
+WHERE event_name IN (
+    'marketing_sign_contract_open_card_ladna',
+    'marketing_activate_credit_limit'
+)
+
+GROUP BY 1;
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+SELECT
+    event_name,
+
+    COUNT(*) AS total_events,
+
+    COUNTIF(
+        customer_user_id IS NULL
+        AND appsflyer_id IS NULL
+    ) AS no_identifiers,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(
+                customer_user_id IS NULL
+                AND appsflyer_id IS NULL
+            ),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS no_identifiers_pct
+
+FROM `appsflyer.inapps`
+
+WHERE event_name IN (
+    'marketing_sign_contract_open_card_ladna',
+    'marketing_activate_credit_limit'
+)
+
+GROUP BY 1;
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+SELECT
+    COUNT(*) AS installs,
+
+    COUNTIF(appsflyer_id IS NULL) AS no_appsflyer_id,
+
+    COUNTIF(customer_user_id IS NULL) AS no_customer_user_id,
+
+    COUNTIF(
+        appsflyer_id IS NULL
+        AND customer_user_id IS NULL
+    ) AS no_identifiers,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(appsflyer_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS no_af_id_pct,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(customer_user_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS no_customer_id_pct,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(
+                appsflyer_id IS NULL
+                AND customer_user_id IS NULL
+            ),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS no_identifiers_pct
+
+FROM `appsflyer.installs`;
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+SELECT
+    appsflyer_id,
+
+    COUNT(DISTINCT customer_user_id) AS customer_count,
+
+    ARRAY_AGG(
+        DISTINCT SAFE_CAST(customer_user_id AS STRING)
+        IGNORE NULLS
+        LIMIT 10
+    ) AS customer_ids
+
+FROM `appsflyer.inapps`
+
+WHERE appsflyer_id IS NOT NULL
+  AND customer_user_id IS NOT NULL
+
+GROUP BY 1
+
+HAVING COUNT(DISTINCT customer_user_id) > 1
+
+ORDER BY customer_count DESC;
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+WITH mapping AS (
+
+    SELECT
+        appsflyer_id,
+        COUNT(DISTINCT customer_user_id) AS customer_count
+
+    FROM `appsflyer.inapps`
+
+    WHERE appsflyer_id IS NOT NULL
+      AND customer_user_id IS NOT NULL
+
+    GROUP BY 1
+)
+
+SELECT
+    COUNT(*) AS total_af_ids,
+
+    COUNTIF(customer_count > 1) AS conflicting_af_ids,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(customer_count > 1),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS conflict_pct
+
+FROM mapping;
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+SELECT
+    customer_user_id,
+
+    COUNT(DISTINCT appsflyer_id) AS appsflyer_id_count
+
+FROM `appsflyer.inapps`
+
+WHERE customer_user_id IS NOT NULL
+  AND appsflyer_id IS NOT NULL
+
+GROUP BY 1
+
+HAVING COUNT(DISTINCT appsflyer_id) > 1
+
+ORDER BY appsflyer_id_count DESC;
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+WITH mapping AS (
+
+    SELECT
+        customer_user_id,
+        COUNT(DISTINCT appsflyer_id) AS af_count
+
+    FROM `appsflyer.inapps`
+
+    WHERE customer_user_id IS NOT NULL
+      AND appsflyer_id IS NOT NULL
+
+    GROUP BY 1
+)
+
+SELECT
+    COUNT(*) AS customers,
+
+    COUNTIF(af_count > 1) AS customers_multiple_af_ids,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(af_count > 1),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS multiple_af_ids_pct
+
+FROM mapping;
+
++++++++++++++++++++++++++++++++++++++++++++++++++++
+WITH cards AS (
+
+    SELECT DISTINCT
+        appsflyer_id
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name =
+        'marketing_sign_contract_open_card_ladna'
+
+      AND appsflyer_id IS NOT NULL
+),
+
+installs AS (
+
+    SELECT DISTINCT
+        appsflyer_id
+
+    FROM `appsflyer.installs`
+
+    WHERE appsflyer_id IS NOT NULL
+)
+
+SELECT
+    COUNT(*) AS card_af_ids,
+
+    COUNTIF(i.appsflyer_id IS NULL) AS card_without_install,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(i.appsflyer_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS card_without_install_pct
+
+FROM cards c
+
+LEFT JOIN installs i
+    USING(appsflyer_id);
 
 
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+WITH limits AS (
+
+    SELECT DISTINCT
+        appsflyer_id
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name =
+        'marketing_activate_credit_limit'
+
+      AND appsflyer_id IS NOT NULL
+),
+
+installs AS (
+
+    SELECT DISTINCT
+        appsflyer_id
+
+    FROM `appsflyer.installs`
+
+    WHERE appsflyer_id IS NOT NULL
+)
+
+SELECT
+    COUNT(*) AS limit_af_ids,
+
+    COUNTIF(i.appsflyer_id IS NULL) AS limit_without_install,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(i.appsflyer_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS limit_without_install_pct
+
+FROM limits l
+
+LEFT JOIN installs i
+    USING(appsflyer_id);
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+WITH limits AS (
+
+    SELECT DISTINCT
+        appsflyer_id
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name =
+        'marketing_activate_credit_limit'
+
+      AND appsflyer_id IS NOT NULL
+),
+
+installs AS (
+
+    SELECT DISTINCT
+        appsflyer_id
+
+    FROM `appsflyer.installs`
+
+    WHERE appsflyer_id IS NOT NULL
+)
+
+SELECT
+    COUNT(*) AS limit_af_ids,
+
+    COUNTIF(i.appsflyer_id IS NULL) AS limit_without_install,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(i.appsflyer_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS limit_without_install_pct
+
+FROM limits l
+
+LEFT JOIN installs i
+    USING(appsflyer_id);
+
++++++++++++++++++++++++++++++++++++++++++++++
+
+WITH cards AS (
+
+    SELECT DISTINCT
+        CONCAT(
+            IFNULL(SAFE_CAST(customer_user_id AS STRING), ''),
+            '-',
+            IFNULL(SAFE_CAST(appsflyer_id AS STRING), '')
+        ) AS combined_id
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name =
+        'marketing_sign_contract_open_card_ladna'
+),
+
+limits AS (
+
+    SELECT DISTINCT
+        CONCAT(
+            IFNULL(SAFE_CAST(customer_user_id AS STRING), ''),
+            '-',
+            IFNULL(SAFE_CAST(appsflyer_id AS STRING), '')
+        ) AS combined_id
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name =
+        'marketing_activate_credit_limit'
+)
+
+SELECT
+    COUNT(*) AS limit_users,
+
+    COUNTIF(c.combined_id IS NULL)
+        AS limit_without_card,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(c.combined_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS limit_without_card_pct
+
+FROM limits l
+
+LEFT JOIN cards c
+    USING(combined_id);
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+WITH installs AS (
+
+    SELECT
+        appsflyer_id,
+        MIN(install_time) AS install_time
+
+    FROM `appsflyer.installs`
+
+    WHERE appsflyer_id IS NOT NULL
+
+    GROUP BY 1
+),
+
+cards AS (
+
+    SELECT
+        appsflyer_id,
+        MIN(event_time) AS card_time
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name =
+        'marketing_sign_contract_open_card_ladna'
+
+      AND appsflyer_id IS NOT NULL
+
+    GROUP BY 1
+)
+
+SELECT
+    COUNT(*) AS matched_cards,
+
+    COUNTIF(card_time < install_time)
+        AS card_before_install,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(card_time < install_time),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS card_before_install_pct
+
+FROM cards
+JOIN installs
+    USING(appsflyer_id);
+
+++++++++++++++++++++++++++++++++++++++++++++++++++
+
+18. Install → Limit chronological consistency
+WITH installs AS (
+
+    SELECT
+        appsflyer_id,
+        MIN(install_time) AS install_time
+
+    FROM `appsflyer.installs`
+
+    WHERE appsflyer_id IS NOT NULL
+
+    GROUP BY 1
+),
+
+limits AS (
+
+    SELECT
+        appsflyer_id,
+        MIN(event_time) AS limit_time
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name =
+        'marketing_activate_credit_limit'
+
+      AND appsflyer_id IS NOT NULL
+
+    GROUP BY 1
+)
+
+SELECT
+    COUNT(*) AS matched_limits,
+
+    COUNTIF(limit_time < install_time)
+        AS limit_before_install,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(limit_time < install_time),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS limit_before_install_pct
+
+FROM limits
+JOIN installs
+    USING(appsflyer_id);
+
+19. Розподіл часу Install → Card
+Це дозволить знайти timestamp anomalies.
+WITH installs AS (
+
+    SELECT
+        appsflyer_id,
+        MIN(install_time) AS install_time
+
+    FROM `appsflyer.installs`
+
+    WHERE appsflyer_id IS NOT NULL
+
+    GROUP BY 1
+),
+
+cards AS (
+
+    SELECT
+        appsflyer_id,
+        MIN(event_time) AS card_time
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name =
+        'marketing_sign_contract_open_card_ladna'
+
+      AND appsflyer_id IS NOT NULL
+
+    GROUP BY 1
+),
+
+diff AS (
+
+    SELECT
+        TIMESTAMP_DIFF(
+            card_time,
+            install_time,
+            HOUR
+        ) AS hours_to_card
+
+    FROM cards
+    JOIN installs USING(appsflyer_id)
+)
+
+SELECT
+    APPROX_QUANTILES(hours_to_card, 100)[OFFSET(0)] AS min_hours,
+    APPROX_QUANTILES(hours_to_card, 100)[OFFSET(25)] AS p25,
+    APPROX_QUANTILES(hours_to_card, 100)[OFFSET(50)] AS median,
+    APPROX_QUANTILES(hours_to_card, 100)[OFFSET(75)] AS p75,
+    APPROX_QUANTILES(hours_to_card, 100)[OFFSET(95)] AS p95,
+    APPROX_QUANTILES(hours_to_card, 100)[OFFSET(99)] AS p99,
+    APPROX_QUANTILES(hours_to_card, 100)[OFFSET(100)] AS max_hours
+
+FROM diff;
+
+Так можна побачити дивні negative/надзвичайно великі лаги.
+20. Розподіл Card → Limit
+WITH events AS (
+
+    SELECT
+        customer_user_id,
+
+        MIN(IF(
+            event_name =
+            'marketing_sign_contract_open_card_ladna',
+            event_time,
+            NULL
+        )) AS card_time,
+
+        MIN(IF(
+            event_name =
+            'marketing_activate_credit_limit',
+            event_time,
+            NULL
+        )) AS limit_time
+
+    FROM `appsflyer.inapps`
+
+    WHERE customer_user_id IS NOT NULL
+
+      AND event_name IN (
+        'marketing_sign_contract_open_card_ladna',
+        'marketing_activate_credit_limit'
+      )
+
+    GROUP BY 1
+),
+
+diff AS (
+
+    SELECT
+        TIMESTAMP_DIFF(
+            limit_time,
+            card_time,
+            MINUTE
+        ) AS minutes_to_limit
+
+    FROM events
+
+    WHERE card_time IS NOT NULL
+      AND limit_time IS NOT NULL
+)
+
+SELECT
+    APPROX_QUANTILES(minutes_to_limit,100)[OFFSET(0)] AS min,
+    APPROX_QUANTILES(minutes_to_limit,100)[OFFSET(25)] AS p25,
+    APPROX_QUANTILES(minutes_to_limit,100)[OFFSET(50)] AS median,
+    APPROX_QUANTILES(minutes_to_limit,100)[OFFSET(75)] AS p75,
+    APPROX_QUANTILES(minutes_to_limit,100)[OFFSET(95)] AS p95,
+    APPROX_QUANTILES(minutes_to_limit,100)[OFFSET(99)] AS p99,
+    APPROX_QUANTILES(minutes_to_limit,100)[OFFSET(100)] AS max
+
+FROM diff;
+
+Тут негативні значення — особливо цікаві.
+21. Дублювання Card events
+SELECT
+    customer_user_id,
+    appsflyer_id,
+
+    COUNT(*) AS card_events
+
+FROM `appsflyer.inapps`
+
+WHERE event_name =
+    'marketing_sign_contract_open_card_ladna'
+
+GROUP BY 1,2
+
+HAVING COUNT(*) > 1
+
+ORDER BY card_events DESC;
+
+22. Наскільки велика проблема duplicate Card events
+WITH x AS (
+
+    SELECT
+        customer_user_id,
+        appsflyer_id,
+        COUNT(*) AS event_count
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name =
+        'marketing_sign_contract_open_card_ladna'
+
+    GROUP BY 1,2
+)
+
+SELECT
+    COUNT(*) AS entities,
+
+    COUNTIF(event_count > 1)
+        AS entities_with_duplicates,
+
+    SUM(event_count) AS raw_events,
+
+    SUM(event_count - 1)
+        AS redundant_events,
+
+    ROUND(
+        SAFE_DIVIDE(
+            SUM(event_count - 1),
+            SUM(event_count)
+        ) * 100,
+        2
+    ) AS redundant_event_pct
+
+FROM x;
+
+Це чудовий KPI для розмови з app team:
+X% усіх card events є повторними передачами тієї самої події.
+
+23. Те саме для credit limit
+WITH x AS (
+
+    SELECT
+        customer_user_id,
+        appsflyer_id,
+        COUNT(*) AS event_count
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name =
+        'marketing_activate_credit_limit'
+
+    GROUP BY 1,2
+)
+
+SELECT
+    COUNT(*) AS entities,
+
+    COUNTIF(event_count > 1)
+        AS entities_with_duplicates,
+
+    SUM(event_count) AS raw_events,
+
+    SUM(event_count - 1)
+        AS redundant_events,
+
+    ROUND(
+        SAFE_DIVIDE(
+            SUM(event_count - 1),
+            SUM(event_count)
+        ) * 100,
+        2
+    ) AS redundant_event_pct
+
+FROM x;
+
+24. Attribution completeness
+Тепер перевіряємо те, заради чого AppsFlyer тобі фактично потрібен.
+SELECT
+    COUNT(*) AS installs,
+
+    COUNTIF(media_source IS NULL) AS no_media_source,
+
+    COUNTIF(campaign IS NULL) AS no_campaign,
+
+    COUNTIF(af_ad_id IS NULL) AS no_creative_id,
+
+    COUNTIF(af_ad IS NULL) AS no_creative_name,
+
+    ROUND(
+        SAFE_DIVIDE(COUNTIF(media_source IS NULL), COUNT(*)) * 100,
+        2
+    ) AS no_media_source_pct,
+
+    ROUND(
+        SAFE_DIVIDE(COUNTIF(campaign IS NULL), COUNT(*)) * 100,
+        2
+    ) AS no_campaign_pct,
+
+    ROUND(
+        SAFE_DIVIDE(COUNTIF(af_ad_id IS NULL), COUNT(*)) * 100,
+        2
+    ) AS no_creative_id_pct,
+
+    ROUND(
+        SAFE_DIVIDE(COUNTIF(af_ad IS NULL), COUNT(*)) * 100,
+        2
+    ) AS no_creative_name_pct
+
+FROM `appsflyer.installs`;
+
+Але тут є нюанс: organic installs природно не мають рекламної attribution. Тому наступний тест важливіший.
+25. Creative completeness тільки серед non-organic / paid
+Якщо у твоїх даних organic визначається через media_source, я б перевірив так:
+SELECT
+    media_source,
+
+    COUNT(*) AS installs,
+
+    COUNTIF(af_ad_id IS NULL) AS missing_creative_id,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(af_ad_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS missing_creative_id_pct,
+
+    COUNTIF(af_ad IS NULL) AS missing_creative_name,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(af_ad IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS missing_creative_name_pct
+
+FROM `appsflyer.installs`
+
+WHERE media_source IS NOT NULL
+
+GROUP BY 1
+ORDER BY installs DESC;
+
+Це покаже тобі, наприклад:
+googleadwords_int    31% missing creative
+Facebook Ads          4% missing creative
+...
+
+І ти вже знатимеш, яке конкретно джерело ламає creative-level attribution.
+26. Campaign completeness по source
+SELECT
+    media_source,
+
+    COUNT(*) AS installs,
+
+    COUNTIF(campaign IS NULL) AS missing_campaign,
+
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(campaign IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS missing_campaign_pct
+
+FROM `appsflyer.installs`
+
+WHERE media_source IS NOT NULL
+
+GROUP BY 1
+
+ORDER BY missing_campaign_pct DESC;
+
+27. Creative ID → декілька creative names
+SELECT
+    media_source,
+    af_ad_id,
+
+    COUNT(DISTINCT af_ad)
+        AS creative_names,
+
+    ARRAY_AGG(
+        DISTINCT af_ad
+        IGNORE NULLS
+        LIMIT 20
+    ) AS names
+
+FROM `appsflyer.installs`
+
+WHERE af_ad_id IS NOT NULL
+
+GROUP BY 1,2
+
+HAVING COUNT(DISTINCT af_ad) > 1
+
+ORDER BY creative_names DESC;
+
+Не кожен такий випадок є помилкою — creative name могли перейменувати. Але це важливо для твого dim_campaign / dim_creative.
+28. Найважливіший тест саме твоєї поточної query
+Тепер порівняй три методи підрахунку.
+SELECT
+    event_name,
+
+    COUNT(DISTINCT customer_user_id)
+        AS by_customer_id,
+
+    COUNT(DISTINCT appsflyer_id)
+        AS by_appsflyer_id,
+
+    COUNT(DISTINCT CONCAT(
+        IFNULL(SAFE_CAST(customer_user_id AS STRING),''),
+        '-',
+        IFNULL(SAFE_CAST(appsflyer_id AS STRING),'')
+    )) AS by_combined_id
+
+FROM `appsflyer.inapps`
+
+WHERE event_name IN (
+    'marketing_sign_contract_open_card_ladna',
+    'marketing_activate_credit_limit'
+)
+
+GROUP BY 1;
+
+Припустимо, отримаєш:
+Event	customer	AF ID	combined
+Card	20,000	20,700	20,850
+Limit	12,000	12,300	12,410
 
 
+Тоді combined ID потенційно завищує customer-level Card приблизно:
+(20,850 - 20,000) / 20,000 = 4.25%
 
-    
+Але це не означає, що твоя метрика неправильна на 4.25%, якщо твоя одиниця аналізу навмисно є customer × AppsFlyer install identity.
+29. Зробимо цей ризик автоматично
+WITH x AS (
 
+    SELECT
+        event_name,
 
+        COUNT(DISTINCT customer_user_id)
+            AS customers,
 
+        COUNT(DISTINCT CONCAT(
+            IFNULL(SAFE_CAST(customer_user_id AS STRING),''),
+            '-',
+            IFNULL(SAFE_CAST(appsflyer_id AS STRING),'')
+        )) AS combined
 
+    FROM `appsflyer.inapps`
 
+    WHERE event_name IN (
+        'marketing_sign_contract_open_card_ladna',
+        'marketing_activate_credit_limit'
+    )
 
+    GROUP BY 1
+)
 
-От! І тут постає наступна задача. Мені треба перевірити якість данних, що поступають з боку команди застосунку в апсфлаєр. Всі місця, котрі можуть вказати, що я отримую шіті дейта. По можливості - ще й вказати ймовірний відсоток похибки
+SELECT
+    *,
 
+    combined - customers AS difference,
 
+    ROUND(
+        SAFE_DIVIDE(
+            combined - customers,
+            customers
+        ) * 100,
+        2
+    ) AS potential_overcount_pct
 
+FROM x;
 
+Це один із показників, який я б точно виніс у звіт.
+30. Data quality по днях — NULL IDs
+Щоб знайти момент, коли tracking зламався:
+SELECT
+    DATE(event_time) AS date,
+    event_name,
 
- 
+    COUNT(*) AS events,
 
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(customer_user_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS customer_id_null_pct,
 
+    ROUND(
+        SAFE_DIVIDE(
+            COUNTIF(appsflyer_id IS NULL),
+            COUNT(*)
+        ) * 100,
+        2
+    ) AS appsflyer_id_null_pct
 
+FROM `appsflyer.inapps`
 
+WHERE event_name IN (
+    'marketing_sign_contract_open_card_ladna',
+    'marketing_activate_credit_limit'
+)
 
+GROUP BY 1,2
 
-Так. Тут я б робив не одну перевірку, а data-quality audit саме ланцюжка AppsFlyer install → identity → card → credit_limit → attribution. Причому частину проблем можна не просто знайти, а оцінити, на скільки % вони потенційно спотворюють твої KPI.
-Я б розділив перевірки на 5 блоків: ідентифікація користувача, дублікати/повторні події, логічна послідовність funnel, timestamps та attribution-поля.
-Ключова ідея: для кожної перевірки рахувати три речі: affected_rows, affected_users і % affected users. Наприклад, якщо 7.3% користувачів із open_card не мають customer_user_id, це вже конкретна оцінка потенційної втрати/невизначеності для user-level funnel.
-Особливо я б перевірив такі ситуації:
-INSTALL
- ├─ appsflyer_id NULL
- ├─ customer_user_id NULL
- ├─ один appsflyer_id → кілька customer_user_id
- └─ один customer_user_id → кілька appsflyer_id
+ORDER BY 1,2;
 
-IN-APP EVENTS
- ├─ appsflyer_id NULL
- ├─ customer_user_id NULL
- ├─ card без відповідного install
- ├─ credit_limit без card
- ├─ event до install
- └─ аномально великий лаг install → event
+Це дуже важливий query. Загальні 2% можуть приховувати:
+до 15 вересня:      0.1%
+16–18 вересня:     37%
+після 19 вересня:   0.2%
 
-ATTRIBUTION
- ├─ media_source NULL
- ├─ campaign NULL
- ├─ creative_id NULL
- ├─ creative_name NULL
- ├─ один creative_id → багато різних creative_name
- └─ attribution змінюється для одного customer/appsflyer_id
+Тобто конкретний реліз застосунку зламав tracking.
+31. Обсяг events по днях
+Ще один спосіб ловити поломки.
+SELECT
+    DATE(event_time) AS date,
 
-Але є важлива різниця між data-quality rate і реальною похибкою KPI. Наприклад, якщо 8% card events мають NULL customer_user_id, це не означає автоматично, що кількість карток помилкова на 8% — AppsFlyer ID може дозволити їх коректно відновити. Тому я б рахував три рівні: confirmed error rate — записи, які точно суперечливі/неможливі; unrecoverable rate — записи, які неможливо надійно зв'язати; at-risk rate — записи, де потенційно можлива помилка.
-Для твоєї задачі найціннішим буде фінальний результат приблизно такого вигляду:
-Перевірка	affected users	%	Ризик
-card без customer_user_id	1,241	4.8%	medium
-card без appsflyer_id	83	0.32%	high
-card без matching install	317	1.22%	high
-limit без card	529	2.04%	high
-card раніше install	17	0.07%	critical
-AF ID → >1 customer ID	41	0.16%	critical
-campaign NULL	3,821	14.7%	attribution
-creative_id NULL серед paid	6,302	24.3%	attribution
+    COUNTIF(
+        event_name =
+        'marketing_sign_contract_open_card_ladna'
+    ) AS card_events,
 
+    COUNTIF(
+        event_name =
+        'marketing_activate_credit_limit'
+    ) AS limit_events,
 
-І вже з цього можна сказати щось на кшталт: «факт відкриття картки має ≤1.5% підтверджено проблемних користувачів, ще 4.8% знаходяться в зоні невизначеності; creative-level attribution потенційно неповна для 24.3% paid acquisition». Це набагато коректніше, ніж назвати один штучний «відсоток якості даних».
-У твоєму випадку я б ще зробив дуже корисну reconciliation-перевірку: порахувати funnel трьома незалежними способами — COUNT events, COUNT DISTINCT appsflyer_id, COUNT DISTINCT customer_user_id — і порівняти:
-COUNT(*)                                      AS events,
-COUNT(DISTINCT appsflyer_id)                  AS af_users,
-COUNT(DISTINCT customer_user_id)              AS customers,
-COUNT(DISTINCT CONCAT(
-    IFNULL(CAST(customer_user_id AS STRING),''),
-    '-',
-    IFNULL(appsflyer_id,'')
-))                                            AS combined_users
+    COUNT(DISTINCT IF(
+        event_name =
+        'marketing_sign_contract_open_card_ladna',
+        customer_user_id,
+        NULL
+    )) AS card_customers,
 
-окремо для open_card та activate_credit_limit. Розрив між цими чотирма числами дуже швидко покаже, де саме твоя поточна методологія починає завищувати або занижувати funnel.
-І ще важливіше: оскільки це банківський funnel, я б перевіряв AppsFlyer не тільки внутрішньо, а й проти source of truth. Якщо в backend банку є фактичні card opened та credit limit activated, тоді можна отримати вже не proxy, а майже справжню похибку:
-Backend card users
-        ↕
-AppsFlyer card users
+    COUNT(DISTINCT IF(
+        event_name =
+        'marketing_activate_credit_limit',
+        customer_user_id,
+        NULL
+    )) AS limit_customers
 
-Backend limit users
-        ↕
-AppsFlyer limit users
+FROM `appsflyer.inapps`
 
-Тоді з'являються false negatives (банк бачить конверсію, AppsFlyer ні) і false positives (AppsFlyer каже, що конверсія була, backend її не підтверджує). Це найсильніший тест якості передачі подій командою застосунку.
-Для твоєї конкретної структури я можу наступним повідомленням зібрати одну BigQuery audit-query, яка поверне готову таблицю на кшталт check_name | affected_users | total_users | error_pct для всіх цих перевірок одразу. Це фактично буде автоматизований health-check AppsFlyer-пайплайна.
+WHERE event_name IN (
+    'marketing_sign_contract_open_card_ladna',
+    'marketing_activate_credit_limit'
+)
+
+GROUP BY 1
+
+ORDER BY 1;
+
+Шукай discontinuities.
+32. Підсумкова audit-query
+І нарешті я б зробив окремий health-check, який можна запускати регулярно.
+WITH base AS (
+
+    SELECT
+        event_name,
+        customer_user_id,
+        appsflyer_id,
+
+        CONCAT(
+            IFNULL(SAFE_CAST(customer_user_id AS STRING),''),
+            '-',
+            IFNULL(SAFE_CAST(appsflyer_id AS STRING),'')
+        ) AS combined_id
+
+    FROM `appsflyer.inapps`
+
+    WHERE event_name IN (
+        'marketing_sign_contract_open_card_ladna',
+        'marketing_activate_credit_limit'
+    )
+),
+
+cards AS (
+
+    SELECT DISTINCT combined_id
+    FROM base
+    WHERE event_name =
+        'marketing_sign_contract_open_card_ladna'
+
+),
+
+limits AS (
+
+    SELECT DISTINCT combined_id
+    FROM base
+    WHERE event_name =
+        'marketing_activate_credit_limit'
+
+),
+
+checks AS (
+
+    SELECT
+        'Card: missing appsflyer_id' AS check_name,
+        COUNTIF(appsflyer_id IS NULL) AS affected,
+        COUNT(*) AS total
+
+    FROM base
+
+    WHERE event_name =
+        'marketing_sign_contract_open_card_ladna'
+
+    UNION ALL
+
+    SELECT
+        'Card: missing customer_user_id',
+        COUNTIF(customer_user_id IS NULL),
+        COUNT(*)
+
+    FROM base
+
+    WHERE event_name =
+        'marketing_sign_contract_open_card_ladna'
+
+    UNION ALL
+
+    SELECT
+        'Limit: missing appsflyer_id',
+        COUNTIF(appsflyer_id IS NULL),
+        COUNT(*)
+
+    FROM base
+
+    WHERE event_name =
+        'marketing_activate_credit_limit'
+
+    UNION ALL
+
+    SELECT
+        'Limit: missing customer_user_id',
+        COUNTIF(customer_user_id IS NULL),
+        COUNT(*)
+
+    FROM base
+
+    WHERE event_name =
+        'marketing_activate_credit_limit'
+
+    UNION ALL
+
+    SELECT
+        'Limit without card',
+        COUNTIF(c.combined_id IS NULL),
+        COUNT(*)
+
+    FROM limits l
+
+    LEFT JOIN cards c
+        USING(combined_id)
+)
+
+SELECT
+    check_name,
+    affected,
+    total,
+
+    ROUND(
+        SAFE_DIVIDE(affected,total) * 100,
+        2
+    ) AS affected_pct
+
+FROM checks
+
+ORDER BY affected_pct DESC;
+
+Отримаєш щось на кшталт:
