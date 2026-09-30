@@ -1,52 +1,138 @@
-BEGIN
-  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE('UTC'), INTERVAL 3 DAY);
-  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE('UTC'), INTERVAL 1 DAY);
+Так, за такого визначення метрики моя попередня критика щодо самого факту використання combined_id потребує уточнення. Твоя логіка дедуплікації загалом відповідає задачі, але в SQL усе одно є один важливий ризик.
+Ти фактично хочеш рахувати не кількість event'ів, а бінарні факти на сутність:
+Install = був хоча б один install
+Card = була хоча б одна marketing_sign_contract_open_card_ladna
+Limit = був хоча б один marketing_activate_credit_limit,
+        АЛЕ тільки якщо Card = TRUE
 
-  -- Початкове завантаження з 2026-08-01.
-  IF NOT EXISTS (
-    SELECT 1
-    FROM `crested-aquifer-142707.IOV_silver.landing`
-    LIMIT 1
-  ) THEN
-    SET start_date = DATE '2026-08-01';
-  END IF;
+Тому SELECT DISTINCT combined_id, TRUE для картки та ліміту цілком логічний: 1, 5 чи 20 однакових event'ів дадуть один факт.
+І твоя конструкція:
+FROM ladna l
+LEFT JOIN activate_credit_row a USING (combined_id)
 
-  BEGIN TRANSACTION;
+також правильно реалізує твою умову «ліміт без відкритої картки нас не цікавить». Користувач, який має activate_credit_limit, але не має sign_contract_open_card, взагалі не потрапить у activate_credit.
+А фінальний:
+WHERE marketing_sign_contract_open_card_ladna = TRUE
 
-  DELETE FROM `crested-aquifer-142707.IOV_silver.landing`
-  WHERE DATE(event_datetime, 'UTC') BETWEEN start_date AND end_date;
+ще раз обмежує результат тільки тими, хто відкрив картку.
+Але проблема combined_id залишається в іншому місці
+Припустимо:
+install:
+customer_user_id = NULL
+appsflyer_id = AF123
 
-  INSERT INTO `crested-aquifer-142707.IOV_silver.landing` (
-    event_datetime,
-    user_id,
-    page_location,
-    click_text,
-    click_url,
-    click_hostname
-  )
-  SELECT
-    TIMESTAMP_MICROS(e.event_timestamp),
-    COALESCE(e.user_id, e.user_pseudo_id),
-    (SELECT ANY_VALUE(p.value.string_value)
-     FROM UNNEST(e.event_params) p WHERE p.key = 'page_location'),
-    (SELECT ANY_VALUE(p.value.string_value)
-     FROM UNNEST(e.event_params) p WHERE p.key = 'click_text'),
-    (SELECT ANY_VALUE(p.value.string_value)
-     FROM UNNEST(e.event_params) p WHERE p.key = 'click_url'),
-    (SELECT ANY_VALUE(p.value.string_value)
-     FROM UNNEST(e.event_params) p WHERE p.key = 'click_hostname')
-  FROM `crested-aquifer-142707.analytics_250473208.events_*` AS e
-  WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date)
-                          AND FORMAT_DATE('%Y%m%d', end_date)
-    AND e.event_name = 'all_click_site'
-    AND DATE(TIMESTAMP_MICROS(e.event_timestamp), 'UTC')
-        BETWEEN start_date AND end_date
-    AND EXISTS (
-      SELECT 1
-      FROM UNNEST(e.event_params) p
-      WHERE p.key = 'page_location'
-        AND p.value.string_value LIKE '%/landing_page/cash-loan/%'
-    );
+card:
+customer_user_id = 777
+appsflyer_id = AF123
 
-  COMMIT TRANSACTION;
-END;
+limit:
+customer_user_id = 777
+appsflyer_id = AF123
+
+Тоді:
+install combined_id = "-AF123"
+
+card combined_id    = "777-AF123"
+
+limit combined_id   = "777-AF123"
+
+card → limit прекрасно з'єднаються.
+Але install → card не з'єднаються, тому що ключ змінився після появи customer_user_id.
+Це важливо саме для твоєї задачі attribution до:
+media_source
+campaign
+creative_id
+creative_name
+
+бо ці поля ти береш із appsflyer.installs.
+Тобто питання не в тому, скільки разів користувач встановив застосунок. Питання в тому, чи зможеш ти приклеїти факт відкриття картки до того install, з якого береш рекламну атрибуцію.
+Якщо ж у твоїх appsflyer.installs customer_user_id вже заповнений тим самим значенням, що й у inapps, тоді цей конкретний ризик зникає.
+Тому я б зараз не переписував query, а зробив один діагностичний тест: перевірив, яка частка customer_user_id IS NULL в installs і яка частка card events не знаходить свій combined_id в installs. Саме це покаже, чи твоя поточна схема реально втрачає картки. Якщо покажеш структуру/результат, дам коротку BigQuery query на цю перевірку.
+
+
+
+
+
+    
+
+
+
+
+
+
+
+От! І тут постає наступна задача. Мені треба перевірити якість данних, що поступають з боку команди застосунку в апсфлаєр. Всі місця, котрі можуть вказати, що я отримую шіті дейта. По можливості - ще й вказати ймовірний відсоток похибки
+
+
+
+
+
+ 
+
+
+
+
+
+
+Так. Тут я б робив не одну перевірку, а data-quality audit саме ланцюжка AppsFlyer install → identity → card → credit_limit → attribution. Причому частину проблем можна не просто знайти, а оцінити, на скільки % вони потенційно спотворюють твої KPI.
+Я б розділив перевірки на 5 блоків: ідентифікація користувача, дублікати/повторні події, логічна послідовність funnel, timestamps та attribution-поля.
+Ключова ідея: для кожної перевірки рахувати три речі: affected_rows, affected_users і % affected users. Наприклад, якщо 7.3% користувачів із open_card не мають customer_user_id, це вже конкретна оцінка потенційної втрати/невизначеності для user-level funnel.
+Особливо я б перевірив такі ситуації:
+INSTALL
+ ├─ appsflyer_id NULL
+ ├─ customer_user_id NULL
+ ├─ один appsflyer_id → кілька customer_user_id
+ └─ один customer_user_id → кілька appsflyer_id
+
+IN-APP EVENTS
+ ├─ appsflyer_id NULL
+ ├─ customer_user_id NULL
+ ├─ card без відповідного install
+ ├─ credit_limit без card
+ ├─ event до install
+ └─ аномально великий лаг install → event
+
+ATTRIBUTION
+ ├─ media_source NULL
+ ├─ campaign NULL
+ ├─ creative_id NULL
+ ├─ creative_name NULL
+ ├─ один creative_id → багато різних creative_name
+ └─ attribution змінюється для одного customer/appsflyer_id
+
+Але є важлива різниця між data-quality rate і реальною похибкою KPI. Наприклад, якщо 8% card events мають NULL customer_user_id, це не означає автоматично, що кількість карток помилкова на 8% — AppsFlyer ID може дозволити їх коректно відновити. Тому я б рахував три рівні: confirmed error rate — записи, які точно суперечливі/неможливі; unrecoverable rate — записи, які неможливо надійно зв'язати; at-risk rate — записи, де потенційно можлива помилка.
+Для твоєї задачі найціннішим буде фінальний результат приблизно такого вигляду:
+Перевірка	affected users	%	Ризик
+card без customer_user_id	1,241	4.8%	medium
+card без appsflyer_id	83	0.32%	high
+card без matching install	317	1.22%	high
+limit без card	529	2.04%	high
+card раніше install	17	0.07%	critical
+AF ID → >1 customer ID	41	0.16%	critical
+campaign NULL	3,821	14.7%	attribution
+creative_id NULL серед paid	6,302	24.3%	attribution
+
+
+І вже з цього можна сказати щось на кшталт: «факт відкриття картки має ≤1.5% підтверджено проблемних користувачів, ще 4.8% знаходяться в зоні невизначеності; creative-level attribution потенційно неповна для 24.3% paid acquisition». Це набагато коректніше, ніж назвати один штучний «відсоток якості даних».
+У твоєму випадку я б ще зробив дуже корисну reconciliation-перевірку: порахувати funnel трьома незалежними способами — COUNT events, COUNT DISTINCT appsflyer_id, COUNT DISTINCT customer_user_id — і порівняти:
+COUNT(*)                                      AS events,
+COUNT(DISTINCT appsflyer_id)                  AS af_users,
+COUNT(DISTINCT customer_user_id)              AS customers,
+COUNT(DISTINCT CONCAT(
+    IFNULL(CAST(customer_user_id AS STRING),''),
+    '-',
+    IFNULL(appsflyer_id,'')
+))                                            AS combined_users
+
+окремо для open_card та activate_credit_limit. Розрив між цими чотирма числами дуже швидко покаже, де саме твоя поточна методологія починає завищувати або занижувати funnel.
+І ще важливіше: оскільки це банківський funnel, я б перевіряв AppsFlyer не тільки внутрішньо, а й проти source of truth. Якщо в backend банку є фактичні card opened та credit limit activated, тоді можна отримати вже не proxy, а майже справжню похибку:
+Backend card users
+        ↕
+AppsFlyer card users
+
+Backend limit users
+        ↕
+AppsFlyer limit users
+
+Тоді з'являються false negatives (банк бачить конверсію, AppsFlyer ні) і false positives (AppsFlyer каже, що конверсія була, backend її не підтверджує). Це найсильніший тест якості передачі подій командою застосунку.
+Для твоєї конкретної структури я можу наступним повідомленням зібрати одну BigQuery audit-query, яка поверне готову таблицю на кшталт check_name | affected_users | total_users | error_pct для всіх цих перевірок одразу. Це фактично буде автоматизований health-check AppsFlyer-пайплайна.
