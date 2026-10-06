@@ -1,1 +1,26 @@
-document.cookie.split('; ').find(x => x.startsWith('_oid='))
+(() => {
+  const oid = document.cookie
+    .split('; ')
+    .find(x => x.startsWith('_oid='))
+    ?.split('=')[1];
+
+  const result = window.AF_SMART_SCRIPT.generateOneLinkURL({
+    oneLinkURL: 'https://otp-bank-ua.onelink.me/Dm00',
+    afParameters: {
+      mediaSource: { defaultValue: 'paid' },
+      afSub3: {
+        keys: [],
+        defaultValue: oid
+      }
+    }
+  });
+
+  return {
+    oid: oid,
+    result: result,
+    clickURL: result?.clickURL,
+    af_sub3: result?.clickURL
+      ? new URL(result.clickURL).searchParams.get('af_sub3')
+      : null
+  };
+})()
