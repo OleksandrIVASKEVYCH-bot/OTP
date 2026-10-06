@@ -1,3 +1,6 @@
-document.querySelector('.click_button_download')?.href
-
-new URL(document.querySelector('.click_button_download')?.href).searchParams.get('af_sub3')
+[...document.querySelectorAll(
+  '.click_button_download, .invest-ovdp, .fb_def_brow, .app_link_click'
+)].map(x => ({
+  class: x.className,
+  href: x.href
+}))
