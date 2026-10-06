@@ -1,10 +1,8 @@
 [...document.querySelectorAll('a')]
-  .filter(x =>
-    x.href.includes('Dm00') ||
-    x.href.includes('onelink.me') ||
-    x.href.includes('link.otpbank.ua')
-  )
+  .filter(x => x.href.includes('link.otpbank.ua/Dm00'))
   .map(x => ({
-    text: x.innerText.trim(),
-    href: x.href
+    class: x.className,
+    id: x.id,
+    href: x.href,
+    outerHTML: x.outerHTML
   }))
