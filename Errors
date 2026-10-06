@@ -1,8 +1,56 @@
-[...document.querySelectorAll('a')]
-  .filter(x => x.href.includes('link.otpbank.ua/Dm00'))
-  .map(x => ({
-    class: x.className,
-    id: x.id,
-    href: x.href,
-    outerHTML: x.outerHTML
-  }))
+Результат дослідження
+Виявлено розрив у передачі OID із сайту в AppsFlyer через af_sub3.
+Підтверджено тестами:
+- _oid коректно створюється на сайті.
+- _oid передається в GA4 як oid.
+- AppsFlyer Smart Script коректно генерує OneLink із af_sub3=<OID>. Поточна конфігурація прямо задає afSub3.defaultValue = oidValue.    Pasted text(20261006-122605)
+- Але Smart Script підміняє href лише для .click_button_download, .invest-ovdp, .fb_def_brow, .app_link_click.    Pasted text(20261006-122605)
+- На протестованій сторінці фактичні app-links не потрапили під ці селектори. У результаті в AppsFlyer af_sub3 = NULL.
+AS IS
+_oid
+  │
+  ├──────────────→ GA4 oid                         ✅
+  │
+  └→ AppsFlyer Smart Script
+          │
+          └→ OneLink + af_sub3=<OID>              ✅
+                       │
+                       X
+                Actual App CTA
+                link.otpbank.ua/Dm00/install       ❌
+                       │
+                       ↓
+                   AppsFlyer
+                 af_sub3 = NULL                    ❌
+
+AS SHOULD BE
+_oid
+  │
+  ├──────────────→ GA4 oid
+  │
+  └→ AppsFlyer Smart Script
+          ↓
+      OneLink + af_sub3=<OID>
+          ↓
+      Actual App CTA
+          ↓
+      AppsFlyer
+      af_sub3=<OID>
+          ↓
+GA4 oid = AppsFlyer af_sub3
+
+Рішення
+Frontend/GTM developer має забезпечити, щоб усі фактичні CTA переходу в застосунок отримували згенерований Smart Script clickURL, а не залишалися зі статичним link.otpbank.ua/Dm00/....
+Тобто виправити/розширити selectors або механізм призначення href, включно з динамічно створеними кнопками.
+Acceptance criterion:
+website _oid
+=
+GA4 oid
+=
+OneLink af_sub3
+=
+actual CTA af_sub3
+=
+AppsFlyer af_sub3
+
+Після фіксу Data Analytics проводить контрольний install і перевіряє появу того самого OID у AppsFlyer.af_sub3.
