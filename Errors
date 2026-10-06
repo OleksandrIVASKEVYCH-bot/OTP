@@ -1,6 +1,1 @@
-[...document.querySelectorAll(
-  '.click_button_download, .invest-ovdp, .fb_def_brow, .app_link_click'
-)].map(x => ({
-  class: x.className,
-  href: x.href
-}))
+document.cookie.split('; ').find(x => x.startsWith('_oid='))
