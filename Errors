@@ -1,85 +1,81 @@
-with all_events as (
-select distinct
-  appsflyer_id
-  ,max(event_name='marketing_sign_contract_open_card_ladna') as marketing_sign_contract_open_card_ladna
-  ,max(event_name= 'marketing_sign_contract_cashloan') as marketing_sign_contract_cashloan
-  ,max(event_name= 'marketing_cash_loan_offer_view') as marketing_cash_loan_offer_view
-from `appsflyer.inapps`
-group by 1
-),
-activate_credit_row as (
-select
-  appsflyer_id
-  ,true as marketing_activate_credit_limit
-from `appsflyer.inapps`
-where event_name in ('marketing_activate_credit_limit')
-),
-activate_credit as (
-select
-  appsflyer_id
-  ,marketing_sign_contract_open_card_ladna
-  ,marketing_sign_contract_cashloan
-  ,marketing_cash_loan_offer_view
-  ,if(marketing_activate_credit_limit is null,false,marketing_activate_credit_limit) as marketing_activate_credit_limit
-from all_events l
-left join activate_credit_row using (appsflyer_id)
-),
-preparation_data AS (
+WITH events AS (
     SELECT
-        appsflyer_id
-        ,case when customer_user_id is null then appsflyer_id 
-            else customer_user_id end as user_id
-        ,cast (install_time as datetime) AS install_date
-        ,media_source
-        ,platform
-        ,campaign
-        ,case when campaign like '%_nb%' then 'Nishchuk'
-          when campaign like '%_az'then 'Zmiienko'
-          else 'other' end responsible_marketing_manager
-        ,af_ad_id as creative_id
-        ,af_ad AS creative_name
-        ,count(distinct(appsflyer_id)) as installs
-FROM `appsflyer.installs`
-group by 1,2,3,4,5,6,7,8,9
+        appsflyer_id,
+        LOGICAL_OR(
+            event_name = 'marketing_sign_contract_open_card_ladna'
+        ) AS marketing_sign_contract_open_card_ladna,
+        LOGICAL_OR(
+            event_name = 'marketing_sign_contract_cashloan'
+        ) AS marketing_sign_contract_cashloan,
+        LOGICAL_OR(
+            event_name = 'marketing_cash_loan_offer_view'
+        ) AS marketing_cash_loan_offer_view,
+        LOGICAL_OR(
+            event_name = 'marketing_activate_credit_limit'
+        ) AS marketing_activate_credit_limit
+    FROM `appsflyer.inapps`
+    WHERE event_name IN (
+        'marketing_sign_contract_open_card_ladna',
+        'marketing_sign_contract_cashloan',
+        'marketing_cash_loan_offer_view',
+        'marketing_activate_credit_limit'
+    )
+    GROUP BY appsflyer_id
 ),
-aggregated as(
-      SELECT
-        user_id
-        ,appsflyer_id
-        ,cast(install_date as date) AS install_date
-        ,media_source
-        ,platform
-        ,campaign
-        ,responsible_marketing_manager
-        ,creative_id
-        ,creative_name
-        ,sum(installs) as installs
-FROM preparation_data
-group by 1,2,3,4,5,6,7,8,9
+
+preparation_data AS (
+    SELECT DISTINCT
+        appsflyer_id,
+        COALESCE(customer_user_id, appsflyer_id) AS user_id,
+        CAST(install_time AS DATETIME) AS install_date,
+        media_source,
+        platform,
+        campaign,
+        CASE
+            WHEN campaign LIKE '%_nb%' THEN 'Nishchuk'
+            WHEN campaign LIKE '%_az' THEN 'Zmiienko'
+            ELSE 'other'
+        END AS responsible_marketing_manager,
+        af_ad_id AS creative_id,
+        af_ad AS creative_name
+    FROM `appsflyer.installs`
 ),
-final as(
-select
-        user_id
-        ,appsflyer_id
-        ,install_date
-        ,media_source
-        ,platform
-        ,campaign
-        ,responsible_marketing_manager
-        ,creative_id
-        ,creative_name
-        ,installs
-        ,if(marketing_sign_contract_open_card_ladna is null,
-            false,marketing_sign_contract_open_card_ladna) as marketing_sign_contract_open_card_ladna
-        ,if(marketing_activate_credit_limit is null,
-            false,marketing_activate_credit_limit) as marketing_activate_credit_limit
-        ,if(marketing_sign_contract_cashloan is null,
-            false,marketing_sign_contract_cashloan) marketing_sign_contract_cashloan
-        ,if(marketing_cash_loan_offer_view is null,
-            false,marketing_cash_loan_offer_view) marketing_cash_loan_offer_view
-from aggregated
-left join activate_credit using (appsflyer_id)
+
+installs AS (
+    SELECT
+        user_id,
+        appsflyer_id,
+        CAST(install_date AS DATE) AS install_date,
+        media_source,
+        platform,
+        campaign,
+        responsible_marketing_manager,
+        creative_id,
+        creative_name,
+        COUNT(appsflyer_id) AS installs
+    FROM preparation_data
+    GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
 )
+
 SELECT
-    *
-FROM final
+    COALESCE(i.user_id, e.appsflyer_id) AS user_id,
+    COALESCE(i.appsflyer_id, e.appsflyer_id) AS appsflyer_id,
+    i.install_date,
+    i.media_source,
+    i.platform,
+    i.campaign,
+    i.responsible_marketing_manager,
+    i.creative_id,
+    i.creative_name,
+    COALESCE(i.installs, 0) AS installs,
+    COALESCE(e.marketing_sign_contract_open_card_ladna, FALSE)
+        AS marketing_sign_contract_open_card_ladna,
+    COALESCE(e.marketing_activate_credit_limit, FALSE)
+        AS marketing_activate_credit_limit,
+    COALESCE(e.marketing_sign_contract_cashloan, FALSE)
+        AS marketing_sign_contract_cashloan,
+    COALESCE(e.marketing_cash_loan_offer_view, FALSE)
+        AS marketing_cash_loan_offer_view
+FROM installs AS i
+FULL OUTER JOIN events AS e
+    ON i.appsflyer_id = e.appsflyer_id;
