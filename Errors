@@ -1,56 +1,85 @@
-Результат дослідження
-Виявлено розрив у передачі OID із сайту в AppsFlyer через af_sub3.
-Підтверджено тестами:
-- _oid коректно створюється на сайті.
-- _oid передається в GA4 як oid.
-- AppsFlyer Smart Script коректно генерує OneLink із af_sub3=<OID>. Поточна конфігурація прямо задає afSub3.defaultValue = oidValue.    Pasted text(20261006-122605)
-- Але Smart Script підміняє href лише для .click_button_download, .invest-ovdp, .fb_def_brow, .app_link_click.    Pasted text(20261006-122605)
-- На протестованій сторінці фактичні app-links не потрапили під ці селектори. У результаті в AppsFlyer af_sub3 = NULL.
-AS IS
-_oid
-  │
-  ├──────────────→ GA4 oid                         ✅
-  │
-  └→ AppsFlyer Smart Script
-          │
-          └→ OneLink + af_sub3=<OID>              ✅
-                       │
-                       X
-                Actual App CTA
-                link.otpbank.ua/Dm00/install       ❌
-                       │
-                       ↓
-                   AppsFlyer
-                 af_sub3 = NULL                    ❌
-
-AS SHOULD BE
-_oid
-  │
-  ├──────────────→ GA4 oid
-  │
-  └→ AppsFlyer Smart Script
-          ↓
-      OneLink + af_sub3=<OID>
-          ↓
-      Actual App CTA
-          ↓
-      AppsFlyer
-      af_sub3=<OID>
-          ↓
-GA4 oid = AppsFlyer af_sub3
-
-Рішення
-Frontend/GTM developer має забезпечити, щоб усі фактичні CTA переходу в застосунок отримували згенерований Smart Script clickURL, а не залишалися зі статичним link.otpbank.ua/Dm00/....
-Тобто виправити/розширити selectors або механізм призначення href, включно з динамічно створеними кнопками.
-Acceptance criterion:
-website _oid
-=
-GA4 oid
-=
-OneLink af_sub3
-=
-actual CTA af_sub3
-=
-AppsFlyer af_sub3
-
-Після фіксу Data Analytics проводить контрольний install і перевіряє появу того самого OID у AppsFlyer.af_sub3.
+with all_events as (
+select distinct
+  appsflyer_id
+  ,max(event_name='marketing_sign_contract_open_card_ladna') as marketing_sign_contract_open_card_ladna
+  ,max(event_name= 'marketing_sign_contract_cashloan') as marketing_sign_contract_cashloan
+  ,max(event_name= 'marketing_cash_loan_offer_view') as marketing_cash_loan_offer_view
+from `appsflyer.inapps`
+group by 1
+),
+activate_credit_row as (
+select
+  appsflyer_id
+  ,true as marketing_activate_credit_limit
+from `appsflyer.inapps`
+where event_name in ('marketing_activate_credit_limit')
+),
+activate_credit as (
+select
+  appsflyer_id
+  ,marketing_sign_contract_open_card_ladna
+  ,marketing_sign_contract_cashloan
+  ,marketing_cash_loan_offer_view
+  ,if(marketing_activate_credit_limit is null,false,marketing_activate_credit_limit) as marketing_activate_credit_limit
+from all_events l
+left join activate_credit_row using (appsflyer_id)
+),
+preparation_data AS (
+    SELECT
+        appsflyer_id
+        ,case when customer_user_id is null then appsflyer_id 
+            else customer_user_id end as user_id
+        ,cast (install_time as datetime) AS install_date
+        ,media_source
+        ,platform
+        ,campaign
+        ,case when campaign like '%_nb%' then 'Nishchuk'
+          when campaign like '%_az'then 'Zmiienko'
+          else 'other' end responsible_marketing_manager
+        ,af_ad_id as creative_id
+        ,af_ad AS creative_name
+        ,count(distinct(appsflyer_id)) as installs
+FROM `appsflyer.installs`
+group by 1,2,3,4,5,6,7,8,9
+),
+aggregated as(
+      SELECT
+        user_id
+        ,appsflyer_id
+        ,cast(install_date as date) AS install_date
+        ,media_source
+        ,platform
+        ,campaign
+        ,responsible_marketing_manager
+        ,creative_id
+        ,creative_name
+        ,sum(installs) as installs
+FROM preparation_data
+group by 1,2,3,4,5,6,7,8,9
+),
+final as(
+select
+        user_id
+        ,appsflyer_id
+        ,install_date
+        ,media_source
+        ,platform
+        ,campaign
+        ,responsible_marketing_manager
+        ,creative_id
+        ,creative_name
+        ,installs
+        ,if(marketing_sign_contract_open_card_ladna is null,
+            false,marketing_sign_contract_open_card_ladna) as marketing_sign_contract_open_card_ladna
+        ,if(marketing_activate_credit_limit is null,
+            false,marketing_activate_credit_limit) as marketing_activate_credit_limit
+        ,if(marketing_sign_contract_cashloan is null,
+            false,marketing_sign_contract_cashloan) marketing_sign_contract_cashloan
+        ,if(marketing_cash_loan_offer_view is null,
+            false,marketing_cash_loan_offer_view) marketing_cash_loan_offer_view
+from aggregated
+left join activate_credit using (appsflyer_id)
+)
+SELECT
+    *
+FROM final
